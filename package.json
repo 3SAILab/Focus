@@ -1,0 +1,70 @@
+{
+  "name": "sigma",
+  "version": "1.0.0",
+  "description": "SIGMA AI Image Generation Tool",
+  "main": "electron/main.js",
+  "scripts": {
+    "electron:dev": "cross-env NODE_ENV=development electron .",
+    "electron:build": "npm run build:frontend && npm run build:backend && electron-builder",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && go build -o ../dist/sigma-backend.exe main.go",
+    "build:backend:mac": "cd backend && GOOS=darwin GOARCH=amd64 go build -o ../dist/sigma-backend-mac main.go",
+    "build:backend:linux": "cd backend && GOOS=linux GOARCH=amd64 go build -o ../dist/sigma-backend-linux main.go",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.sigma.app",
+    "productName": "SIGMA",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "dist/sigma-backend*",
+      "!**/node_modules/**/*",
+      "!**/.git/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.graphics-design"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Graphics"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "cross-env": "^7.0.3"
+  }
+}
+

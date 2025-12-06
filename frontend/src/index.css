@@ -1,0 +1,352 @@
+@import "tailwindcss";
+
+/* 基础设置 */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: #fafafa;
+  color: #111827;
+  overflow: hidden; /* 防止body滚动，由主容器接管 */
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 3px;
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.masonry-card {
+  break-inside: avoid;
+  margin-bottom: 16px;
+}
+
+.btn-red {
+  background-color: #dc2626;
+  color: white;
+  transition: all 0.2s;
+}
+
+.btn-red:hover {
+  background-color: #b91c1c;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25);
+}
+
+/* 堆叠图片效果 - 优化多图参考显示 */
+.stack-container {
+  position: relative;
+  width: 56px;
+  height: 56px;
+}
+
+.stack-item {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  border: 2px solid white;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  object-fit: cover;
+  background: #f3f4f6;
+}
+
+.stack-item:nth-child(1) {
+  z-index: 30;
+  transform: rotate(0deg) translateZ(0);
+}
+
+.stack-item:nth-child(2) {
+  z-index: 20;
+  transform: rotate(-5deg) translateX(-3px) translateY(2px) translateZ(0);
+  opacity: 0.95;
+}
+
+.stack-item:nth-child(3) {
+  z-index: 10;
+  transform: rotate(6deg) translateX(3px) translateY(4px) translateZ(0);
+  opacity: 0.9;
+}
+
+.stack-item:nth-child(n+4) {
+  display: none;
+}
+
+/* 比例选择UI */
+.aspect-ratio-selector {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  background: white;
+  border-radius: 12px;
+  margin-top: 8px;
+  overflow-x: auto;
+}
+
+.aspect-option {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 60px;
+}
+
+.aspect-option:hover {
+  background: #f3f4f6;
+}
+
+.aspect-option.active {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.aspect-icon {
+  width: 32px;
+  height: 32px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aspect-label {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* 清晰度选择 */
+.quality-selector {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+.quality-option {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quality-option:hover {
+  background: #f3f4f6;
+}
+
+.quality-option.active {
+  background: #dc2626;
+  color: white;
+}
+
+/* 动画特效 */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.shimmer-bg {
+  animation: shimmer 2s infinite linear;
+  background: linear-gradient(
+    to right,
+    #f3f4f6 4%,
+    #e5e7eb 25%,
+    #f3f4f6 36%
+  );
+  background-size: 1000px 100%;
+}
+
+.scan-line {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(220, 38, 38, 0.1) 50%,
+    transparent
+  );
+  transform: translateY(-100%);
+  animation: scan 2s infinite linear;
+  z-index: 10;
+  pointer-events: none;
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+/* 灯箱样式 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.95);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.lightbox.active {
+  opacity: 1;
+}
+
+.lightbox img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  transition: transform 0.3s;
+  cursor: zoom-in;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  z-index: 10000;
+}
+
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 历史记录侧边栏 */
+.history-item {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.history-item:hover {
+  background: #f3f4f6;
+}
+
+.history-item.active {
+  background: #fee2e2;
+}
+
+.history-thumb {
+  width: 100%;
+  aspect-ratio: 3/4;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.stack-container {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  transition: transform 0.2s;
+}
+
+.stack-item {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  border: 2px solid white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  object-fit: cover;
+  background: #f3f4f6;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.stack-container:hover .stack-item:nth-child(1) {
+  transform: translateY(-4px);
+}
+.stack-container:hover .stack-item:nth-child(2) {
+  transform: rotate(-12deg) translateX(-6px) translateY(2px);
+}
+.stack-container:hover .stack-item:nth-child(3) {
+  transform: rotate(12deg) translateX(6px) translateY(4px);
+}
+
+/* 灯箱拖拽相关 */
+.lightbox img.grabbing {
+  cursor: grabbing;
+}
+.lightbox img.grab {
+  cursor: grab;
+}
+
+/* 齿轮旋转动画 */
+.rotate-180 {
+  transform: rotate(90deg);
+}
+
+/* 对话流动画 */
+.fade-in-up {
+  opacity: 0;
+  transform: translateY(20px);
+  animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeInUp {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 比例选择器网格布局 */
+.aspect-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
