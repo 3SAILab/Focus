@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
 import Lightbox from '../components/Lightbox';
 import ImageCard from '../components/ImageCard';
 import type { GenerationHistory } from '../type';
 import { api } from '../api';
 import { formatDate } from '../utils';
+import { PageHeader } from '../components/common';
 
 export default function HistoryDetail() {
   const { date } = useParams<{ date: string }>();
@@ -13,6 +13,18 @@ export default function HistoryDetail() {
   const [history, setHistory] = useState<GenerationHistory[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [filteredHistory, setFilteredHistory] = useState<GenerationHistory[]>([]);
+
+  const loadHistory = async () => {
+    try {
+      const response = await api.getHistory();
+      if (response.ok) {
+        const data = await response.json();
+        setHistory(data);
+      }
+    } catch (error) {
+      console.error('加载历史记录失败:', error);
+    }
+  };
 
   useEffect(() => {
     loadHistory();
@@ -28,7 +40,7 @@ export default function HistoryDetail() {
           }
           const itemDateStr = itemDate.toISOString().split('T')[0];
           return itemDateStr === date;
-        } catch (e) {
+        } catch {
           return false;
         }
       });
@@ -36,33 +48,13 @@ export default function HistoryDetail() {
     }
   }, [date, history]);
 
-  const loadHistory = async () => {
-    try {
-      const response = await api.getHistory();
-      if (response.ok) {
-        const data = await response.json();
-        setHistory(data);
-      }
-    } catch (error) {
-      console.error('加载历史记录失败:', error);
-    }
-  };
-
   return (
     <>
-      <header className="h-16 px-8 flex items-center justify-between bg-white/50 backdrop-blur-sm border-b border-gray-100 sticky top-0 z-30">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => navigate('/history')}
-            className="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5 text-gray-600" />
-          </button>
-          <h1 className="text-xl font-bold text-gray-800 tracking-tight">
-            {date ? formatDate(date) : '历史记录'}
-          </h1>
-        </div>
-      </header>
+      <PageHeader
+        title={date ? formatDate(date) : '历史记录'}
+        statusColor="blue"
+        backButton={{ onClick: () => navigate('/history') }}
+      />
 
       <div className="flex-1 overflow-y-auto">
         {filteredHistory.length === 0 ? (

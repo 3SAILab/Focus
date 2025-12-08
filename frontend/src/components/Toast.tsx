@@ -15,22 +15,51 @@ interface ToastProps {
   onClose: (id: string) => void;
 }
 
+const icons = {
+  success: CheckCircle,
+  error: AlertCircle,
+  warning: AlertTriangle,
+  info: Info,
+};
+
+const styles = {
+  success: {
+    bg: 'bg-green-50',
+    border: 'border-green-200',
+    text: 'text-green-800',
+    icon: 'text-green-600',
+    iconBg: 'bg-green-100',
+    defaultDuration: 3000,
+  },
+  error: {
+    bg: 'bg-red-50',
+    border: 'border-red-200',
+    text: 'text-red-800',
+    icon: 'text-red-600',
+    iconBg: 'bg-red-100',
+    defaultDuration: 5000, // 错误信息显示更长时间
+  },
+  warning: {
+    bg: 'bg-yellow-50',
+    border: 'border-yellow-200',
+    text: 'text-yellow-800',
+    icon: 'text-yellow-600',
+    iconBg: 'bg-yellow-100',
+    defaultDuration: 4000,
+  },
+  info: {
+    bg: 'bg-blue-50',
+    border: 'border-blue-200',
+    text: 'text-blue-800',
+    icon: 'text-blue-600',
+    iconBg: 'bg-blue-100',
+    defaultDuration: 3000,
+  },
+};
+
 export default function ToastItem({ toast, onClose }: ToastProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
-
-  useEffect(() => {
-    // 进入动画
-    setTimeout(() => setIsVisible(true), 10);
-
-    // 自动关闭
-    const duration = toast.duration || 3000;
-    const timer = setTimeout(() => {
-      handleClose();
-    }, duration);
-
-    return () => clearTimeout(timer);
-  }, [toast.duration]);
 
   const handleClose = () => {
     setIsLeaving(true);
@@ -39,43 +68,19 @@ export default function ToastItem({ toast, onClose }: ToastProps) {
     }, 300);
   };
 
-  const icons = {
-    success: CheckCircle,
-    error: AlertCircle,
-    warning: AlertTriangle,
-    info: Info,
-  };
+  useEffect(() => {
+    // 进入动画
+    setTimeout(() => setIsVisible(true), 10);
 
-  const styles = {
-    success: {
-      bg: 'bg-green-50',
-      border: 'border-green-200',
-      text: 'text-green-800',
-      icon: 'text-green-600',
-      iconBg: 'bg-green-100',
-    },
-    error: {
-      bg: 'bg-red-50',
-      border: 'border-red-200',
-      text: 'text-red-800',
-      icon: 'text-red-600',
-      iconBg: 'bg-red-100',
-    },
-    warning: {
-      bg: 'bg-yellow-50',
-      border: 'border-yellow-200',
-      text: 'text-yellow-800',
-      icon: 'text-yellow-600',
-      iconBg: 'bg-yellow-100',
-    },
-    info: {
-      bg: 'bg-blue-50',
-      border: 'border-blue-200',
-      text: 'text-blue-800',
-      icon: 'text-blue-600',
-      iconBg: 'bg-blue-100',
-    },
-  };
+    // 自动关闭 - 根据类型使用不同的默认时长
+    const style = styles[toast.type];
+    const duration = toast.duration || style.defaultDuration || 3000;
+    const timer = setTimeout(() => {
+      handleClose();
+    }, duration);
+
+    return () => clearTimeout(timer);
+  }, [toast.duration, toast.type, toast.id]);
 
   const Icon = icons[toast.type];
   const style = styles[toast.type];
@@ -106,4 +111,3 @@ export default function ToastItem({ toast, onClose }: ToastProps) {
     </div>
   );
 }
-

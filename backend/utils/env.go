@@ -18,6 +18,12 @@ func GetEnvOrDefault(key, defaultValue string) string {
 func GetBaseURL(port string) string {
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
+		// 检查是否启用了 TLS，如果启用则使用 HTTPS
+		tlsCertPath := os.Getenv("TLS_CERT_PATH")
+		tlsKeyPath := os.Getenv("TLS_KEY_PATH")
+		if tlsCertPath != "" && tlsKeyPath != "" {
+			return fmt.Sprintf("https://localhost:%s", port)
+		}
 		return fmt.Sprintf("http://localhost:%s", port)
 	}
 	return baseURL

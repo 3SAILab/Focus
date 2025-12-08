@@ -51,6 +51,9 @@ var (
 	// TLSEnabled 是否启用 TLS
 	TLSEnabled bool
 	
+	// IsProduction 是否为生产环境
+	IsProduction bool
+	
 	// DB 数据库实例
 	DB *gorm.DB
 )
@@ -78,10 +81,17 @@ func Init() {
 	TLSCertPath = os.Getenv("TLS_CERT_PATH")
 	TLSKeyPath = os.Getenv("TLS_KEY_PATH")
 	TLSEnabled = TLSCertPath != "" && TLSKeyPath != ""
+	
+	// 生产环境检测 (通过环境变量或 TLS 启用状态判断)
+	prodStr := utils.GetEnvOrDefault("PRODUCTION", "false")
+	IsProduction = prodStr == "true" || prodStr == "1" || TLSEnabled
 }
 
-// LogConfig 记录配置信息用于调试
+// LogConfig 记录配置信息用于调试 (仅在非生产环境输出)
 func LogConfig() {
+	if IsProduction {
+		return
+	}
 	fmt.Println("配置信息:")
 	fmt.Println("  - 输出目录:", OutputDir)
 	fmt.Println("  - 上传目录:", UploadDir)

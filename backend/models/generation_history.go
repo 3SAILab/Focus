@@ -11,6 +11,8 @@ const (
 	GenerationTypeCreate          = "create"           // 创作空间生成
 	GenerationTypeWhiteBackground = "white_background" // 白底图生成
 	GenerationTypeClothingChange  = "clothing_change"  // 换装生成
+	GenerationTypeProductScene    = "product_scene"    // 一键商品图生成
+	GenerationTypeLightShadow     = "light_shadow"     // 光影融合生成
 )
 
 // GenerationHistory 数据库模型

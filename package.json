@@ -1,14 +1,14 @@
 {
-  "name": "sigma",
-  "version": "1.0.0",
-  "description": "SIGMA AI Image Generation Tool",
+  "name": "focus",
+  "version": "1.0.0-beta",
+  "description": "Focus AI Image Generation Tool - 内部测试版",
   "main": "electron/main.js",
   "scripts": {
     "dev": "cross-env NODE_ENV=development electron .",
     "build": "npm run build:sequential",
     "build:sequential": "npm run build:frontend && npm run build:backend:win && npm run validate:build && npm run build:electron",
     "build:frontend": "cd frontend && npm run build && cd ..",
-    "build:backend:win": "cd backend && go build -ldflags=\"-s -w\" -o ../dist/backend/sigma-backend.exe . && cd ..",
+    "build:backend:win": "cd backend && go build -ldflags=\"-s -w\" -o ../dist/backend/sigma-backend.exe . && cd .. && copy backend\\.env.template dist\\backend\\.env",
     "build:backend:mac": "cd backend && set GOOS=darwin&& set GOARCH=amd64&& go build -ldflags=\"-s -w\" -o ../dist/backend/sigma-backend && cd ..",
     "build:backend:linux": "cd backend && set GOOS=linux&& set GOARCH=amd64&& go build -ldflags=\"-s -w\" -o ../dist/backend/sigma-backend && cd ..",
     "build:electron": "electron-builder",
@@ -28,11 +28,11 @@
     "test:build": "jest electron/build-validation.test.js"
   },
   "build": {
-    "appId": "com.sigma.app",
-    "productName": "SIGMA",
-    "copyright": "Copyright © 2024 SIGMA",
+    "appId": "com.focus.app",
+    "productName": "Focus",
+    "copyright": "Copyright © 2025 希革马（宁波市）人工智能有限责任公司",
     "directories": {
-      "output": "release-v3",
+      "output": "release-dev-0.2",
       "buildResources": "assets"
     },
     "files": [
@@ -65,7 +65,7 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "assets/icon.ico",
+      "icon": "assets/focus.ico",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "requestedExecutionLevel": "asInvoker"
     },
@@ -101,10 +101,10 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "SIGMA",
-      "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico",
-      "installerHeaderIcon": "assets/icon.ico",
+      "shortcutName": "Focus 内部测试版",
+      "installerIcon": "assets/focus.ico",
+      "uninstallerIcon": "assets/focus.ico",
+      "installerHeaderIcon": "assets/focus.ico",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true
     },

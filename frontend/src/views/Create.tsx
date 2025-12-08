@@ -1,20 +1,19 @@
 // src/views/Create.tsx
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
 import Lightbox from '../components/Lightbox';
 import ImageCard from '../components/ImageCard';
 import PlaceholderCard from '../components/PlaceholderCard';
 import PromptBar from '../components/PromptBar';
-import GenerationCounter from '../components/GenerationCounter';
-import QuotaErrorAlert from '../components/QuotaErrorAlert';
-import ContactModal from '../components/ContactModal';
-import type { GenerationHistory } from '../type';
+import { PageHeader, QuotaErrorHandler } from '../components/common';
+import type { GenerationHistory, GenerationTask } from '../type';
 import { GenerationType } from '../type';
 import { api } from '../api';
 import { loadImageAsFile } from '../utils';
 import { useToast } from '../context/ToastContext';
 import { getErrorMessage } from '../utils/errorHandler';
+import { useTaskRecovery } from '../hooks/useTaskRecovery';
 
 export default function Create() {
   const toast = useToast();
@@ -35,6 +34,56 @@ export default function Create() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isInitialLoadRef = useRef(true); // 标记是否为首次加载
+
+  const scrollToBottom = () => {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const response = await api.getHistory();
+      if (response.ok) {
+        const data: GenerationHistory[] = await response.json();
+        // 过滤掉白底图和换装的历史记录，只显示创作空间的
+        const filteredData = data.filter(
+          (item) => !item.type || item.type === GenerationType.CREATE
+        );
+        setHistory(filteredData);
+      }
+    } catch (error) {
+      console.error('加载历史记录失败:', error);
+    }
+  }, []);
+
+  // Task recovery callbacks
+  const handleTaskComplete = useCallback((task: GenerationTask) => {
+    console.log('[Create] Task completed:', task.task_id);
+    // Reload history to show the completed task
+    loadHistory();
+    // Refresh generation counter
+    setCounterRefresh(prev => prev + 1);
+    toast.success('图片生成完成');
+  }, [loadHistory, toast]);
+
+  const handleTaskFailed = useCallback((task: GenerationTask) => {
+    console.log('[Create] Task failed:', task.task_id, task.error_msg);
+    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+    if (isQuotaError) {
+      setShowQuotaError(true);
+    } else {
+      toast.error('生成失败: ' + message);
+    }
+  }, [toast]);
+
+  // Use task recovery hook to restore in-progress tasks after page refresh
+  // Requirements: 1.4, 1.5, 2.1, 2.2, 2.3, 2.4
+  const { processingTasks, isRecovering } = useTaskRecovery({
+    type: GenerationType.CREATE,
+    onTaskComplete: handleTaskComplete,
+    onTaskFailed: handleTaskFailed,
+  });
 
   useEffect(() => {
     loadHistory();
@@ -93,28 +142,6 @@ export default function Create() {
       scrollToBottom();
     }
   }, [isGenerating]);
-
-  const scrollToBottom = () => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const loadHistory = async () => {
-    try {
-      const response = await api.getHistory();
-      if (response.ok) {
-        const data: GenerationHistory[] = await response.json();
-        // 过滤掉白底图和换装的历史记录，只显示创作空间的
-        const filteredData = data.filter(
-          (item) => !item.type || item.type === GenerationType.CREATE
-        );
-        setHistory(filteredData);
-      }
-    } catch (error) {
-      console.error('加载历史记录失败:', error);
-    }
-  };
 
   const handleGenerate = async () => {
     setIsGenerating(false);
@@ -230,13 +257,12 @@ export default function Create() {
 
   return (
     <>
-      <header className="h-14 px-6 flex items-center bg-white/80 backdrop-blur-md border-b border-gray-100 sticky top-0 z-30 justify-between">
-        <h1 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-500"></span>
-          AI 创意工坊
-        </h1>
-        <GenerationCounter refreshTrigger={counterRefresh} />
-      </header>
+      <PageHeader
+        title="AI 创意工坊"
+        statusColor="green"
+        showCounter
+        counterRefresh={counterRefresh}
+      />
 
       <div
         className="flex-1 overflow-y-auto bg-[#fafafa] scroll-smooth"
@@ -244,8 +270,8 @@ export default function Create() {
       >
         <div className="max-w-3xl mx-auto px-4 py-8 pb-32 min-h-full flex flex-col justify-end">
           
-          {/* 空状态提示 */}
-          {history.length === 0 && !isGenerating && (
+          {/* 空状态提示 - 考虑恢复中状态和处理中任务 */}
+          {history.length === 0 && !isGenerating && !isRecovering && processingTasks.length === 0 && (
             <div className="flex flex-col items-center justify-center text-gray-400 py-20 fade-in-up">
               <div className="w-20 h-20 bg-gradient-to-br from-red-50 to-orange-50 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
                 <div className="w-8 h-8 bg-red-400/20 rounded-full blur-xl absolute"></div>
@@ -255,6 +281,14 @@ export default function Create() {
               <p className="text-sm text-gray-400 text-center">
                 在下方输入框描述画面，支持中英文提示词
               </p>
+            </div>
+          )}
+          
+          {/* 恢复中状态提示 */}
+          {isRecovering && (
+            <div className="flex flex-col items-center justify-center text-gray-400 py-20 fade-in-up">
+              <div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+              <p className="text-sm text-gray-500">正在恢复任务状态...</p>
             </div>
           )}
 
@@ -283,7 +317,7 @@ export default function Create() {
                       <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-red-200">
                           AI
                       </div>
-                      <span className="text-xs text-gray-400 font-medium">SIGMA</span>
+                      <span className="text-xs text-gray-400 font-medium">Focus</span>
                   </div>
                   <div className="w-full max-w-xl">
                     <ImageCard
@@ -293,6 +327,28 @@ export default function Create() {
                       onRegenerate={handleRegenerate}
                       onUseAsReference={handleUseAsReference}
                     />
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {/* 恢复的处理中任务 - Requirements: 1.4, 2.1 */}
+            {processingTasks.map((task) => (
+              <div key={task.task_id} className="flex flex-col w-full fade-in-up mt-8">
+                <div className="flex justify-end mb-3 px-2">
+                  <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm opacity-50">
+                    {task.prompt || '正在思考...'}
+                  </div>
+                </div>
+                <div className="flex flex-col items-start w-full pl-2">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-white text-xs font-bold animate-pulse">
+                      AI
+                    </div>
+                    <span className="text-xs text-red-500 font-medium">正在生成中...</span>
+                  </div>
+                  <div className="w-full max-w-xl">
+                    <PlaceholderCard key={task.task_id} />
                   </div>
                 </div>
               </div>
@@ -356,18 +412,17 @@ export default function Create() {
 
       <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
       
-      {/* 配额耗尽错误弹窗 */}
-      <QuotaErrorAlert
-        isOpen={showQuotaError}
-        onClose={() => setShowQuotaError(false)}
+      {/* 配额错误处理 */}
+      <QuotaErrorHandler
+        showQuotaError={showQuotaError}
+        showContact={showContact}
+        onQuotaErrorClose={() => setShowQuotaError(false)}
+        onContactClose={() => setShowContact(false)}
         onContactSales={() => {
           setShowQuotaError(false);
           setShowContact(true);
         }}
       />
-      
-      {/* 联系销售弹窗 */}
-      <ContactModal isOpen={showContact} onClose={() => setShowContact(false)} />
     </>
   );
 }

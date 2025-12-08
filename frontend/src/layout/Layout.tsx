@@ -1,20 +1,34 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Sparkles, PenTool, History, ImageIcon, Shield, MessageCircle, Settings, CheckCircle, Shirt } from 'lucide-react';
+import { Sparkles, PenTool, History, ImageIcon, Shield, MessageCircle, Settings, CheckCircle, Shirt, Star, ShoppingBag, Package, Sun, ChevronRight } from 'lucide-react';
 import DisclaimerModal from '../components/DisclaimerModal';
 import ContactModal from '../components/ContactModal';
+import SalesModal from '../components/SalesModal';
 import { useConfig } from '../context/ConfigContext';
+
+// 电商处理子菜单路径
+const ecommercePaths = ['/white-background', '/clothing-change', '/product-scene', '/light-shadow'];
+
+// 检查当前路径是否属于电商处理菜单
+export function isEcommercePath(pathname: string): boolean {
+  return ecommercePaths.some(path => pathname === path || pathname.startsWith(path + '/'));
+}
 
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [showContact, setShowContact] = useState(false);
+  const [showSales, setShowSales] = useState(false);
+  const [isEcommerceMenuOpen, setIsEcommerceMenuOpen] = useState(false);
   const { openSettings, hasAgreedDisclaimer } = useConfig();
 
   const isActive = (path: string) => {
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
+
+  // 电商处理菜单是否高亮
+  const isEcommerceActive = isEcommercePath(location.pathname);
 
   return (
     <div className="h-screen w-screen overflow-hidden flex text-gray-800">
@@ -27,6 +41,7 @@ export default function Layout() {
             </div>
           </div>
           <nav className="flex flex-col w-full gap-2">
+            {/* 创作菜单 */}
             <button
               onClick={() => navigate('/create')}
               className={`w-full py-4 flex flex-col items-center justify-center transition-all ${
@@ -38,28 +53,93 @@ export default function Layout() {
               <PenTool className="w-6 h-6 mb-1" />
               <span className="text-[10px] font-medium">创作</span>
             </button>
-            <button
-              onClick={() => navigate('/white-background')}
-              className={`w-full py-4 flex flex-col items-center justify-center transition-all ${
-                isActive('/white-background')
-                  ? 'text-red-600 bg-red-50 border-r-2 border-red-600'
-                  : 'text-gray-400 hover:text-red-500 hover:bg-gray-50'
-              }`}
+
+            {/* 电商处理菜单 - 带子菜单 */}
+            <div 
+              className="relative"
+              onMouseEnter={() => setIsEcommerceMenuOpen(true)}
+              onMouseLeave={() => setIsEcommerceMenuOpen(false)}
             >
-              <ImageIcon className="w-6 h-6 mb-1" />
-              <span className="text-[10px] font-medium">白底图</span>
-            </button>
-            <button
-              onClick={() => navigate('/clothing-change')}
-              className={`w-full py-4 flex flex-col items-center justify-center transition-all ${
-                isActive('/clothing-change')
-                  ? 'text-red-600 bg-red-50 border-r-2 border-red-600'
-                  : 'text-gray-400 hover:text-red-500 hover:bg-gray-50'
-              }`}
-            >
-              <Shirt className="w-6 h-6 mb-1" />
-              <span className="text-[10px] font-medium">换装</span>
-            </button>
+              <button
+                className={`w-full py-4 flex flex-col items-center justify-center transition-all ${
+                  isEcommerceActive
+                    ? 'text-red-600 bg-red-50 border-r-2 border-red-600'
+                    : 'text-gray-400 hover:text-red-500 hover:bg-gray-50'
+                }`}
+              >
+                <ShoppingBag className="w-6 h-6 mb-1" />
+                <span className="text-[10px] font-medium">电商</span>
+                <ChevronRight className={`w-3 h-3 absolute right-1 top-1/2 -translate-y-1/2 transition-transform ${isEcommerceMenuOpen ? 'rotate-90' : ''}`} />
+              </button>
+
+              {/* 子菜单 - hover 展开，使用透明桥接区域防止鼠标移动时菜单消失 */}
+              {isEcommerceMenuOpen && (
+                <>
+                  {/* 透明桥接区域，连接主菜单和子菜单 */}
+                  <div className="absolute left-full top-0 w-2 h-full" />
+                  <div className="absolute left-full top-0 ml-2 bg-white rounded-lg shadow-lg border border-gray-100 py-2 min-w-[120px] z-50">
+                    <button
+                      onClick={() => {
+                        navigate('/white-background');
+                        setIsEcommerceMenuOpen(false);
+                      }}
+                      className={`w-full px-4 py-2.5 flex items-center gap-2 transition-all ${
+                        isActive('/white-background')
+                          ? 'text-red-600 bg-red-50'
+                          : 'text-gray-600 hover:text-red-500 hover:bg-gray-50'
+                      }`}
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                      <span className="text-xs font-medium">白底图</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        navigate('/clothing-change');
+                        setIsEcommerceMenuOpen(false);
+                      }}
+                      className={`w-full px-4 py-2.5 flex items-center gap-2 transition-all ${
+                        isActive('/clothing-change')
+                          ? 'text-red-600 bg-red-50'
+                          : 'text-gray-600 hover:text-red-500 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Shirt className="w-4 h-4" />
+                      <span className="text-xs font-medium">换装</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        navigate('/product-scene');
+                        setIsEcommerceMenuOpen(false);
+                      }}
+                      className={`w-full px-4 py-2.5 flex items-center gap-2 transition-all ${
+                        isActive('/product-scene')
+                          ? 'text-red-600 bg-red-50'
+                          : 'text-gray-600 hover:text-red-500 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Package className="w-4 h-4" />
+                      <span className="text-xs font-medium">商品图</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        navigate('/light-shadow');
+                        setIsEcommerceMenuOpen(false);
+                      }}
+                      className={`w-full px-4 py-2.5 flex items-center gap-2 transition-all ${
+                        isActive('/light-shadow')
+                          ? 'text-red-600 bg-red-50'
+                          : 'text-gray-600 hover:text-red-500 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Sun className="w-4 h-4" />
+                      <span className="text-xs font-medium">光影</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* 历史菜单 */}
             <button
               onClick={() => navigate('/history')}
               className={`w-full py-4 flex flex-col items-center justify-center transition-all ${
@@ -74,8 +154,8 @@ export default function Layout() {
           </nav>
         </div>
 
-        {/* 下半部分：设置、免责声明和联系我们 */}
-        <div className="w-full flex flex-col gap-1 px-2">
+        {/* 下半部分：设置、免责声明、联系我们、升级服务 */}
+        <div className="w-full flex flex-col gap-1 px-2 pb-3">
           <button
             onClick={openSettings}
             className="w-full py-3 flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all group"
@@ -107,6 +187,14 @@ export default function Layout() {
             <MessageCircle className="w-5 h-5 mb-0.5" />
             <span className="text-[9px] font-medium">联系</span>
           </button>
+          <button
+            onClick={() => setShowSales(true)}
+            className="w-full py-3 flex flex-col items-center justify-center text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-all"
+            title="需要更好的服务？联系销售"
+          >
+            <Star className="w-5 h-5 mb-0.5" />
+            <span className="text-[9px] font-medium">升级</span>
+          </button>
         </div>
       </aside>
 
@@ -122,6 +210,7 @@ export default function Layout() {
         requireAgree={false}
       />
       <ContactModal isOpen={showContact} onClose={() => setShowContact(false)} />
+      <SalesModal isOpen={showSales} onClose={() => setShowSales(false)} />
     </div>
   );
 }

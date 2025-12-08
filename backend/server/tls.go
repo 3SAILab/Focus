@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,12 +52,16 @@ func StartHTTPSServer(router *gin.Engine, config TLSConfig) error {
 		MinVersion:   tls.VersionTLS12,
 	}
 	
-	// 创建 HTTPS 服务器
+	// 创建 HTTPS 服务器，添加超时设置防止请求卡死
 	addr := fmt.Sprintf(":%d", config.Port)
 	server := &http.Server{
-		Addr:      addr,
-		Handler:   router,
-		TLSConfig: tlsConfig,
+		Addr:         addr,
+		Handler:      router,
+		TLSConfig:    tlsConfig,
+		// 建议全部增加到 300秒 或更长
+		ReadTimeout:  300 * time.Second,  
+		WriteTimeout: 300 * time.Second,  
+		IdleTimeout:  300 * time.Second,  
 	}
 	
 	log.Printf("HTTPS 服务器启动在端口 %d", config.Port)

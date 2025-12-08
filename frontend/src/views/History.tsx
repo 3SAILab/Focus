@@ -3,11 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import type { GenerationHistory } from '../type';
 import { api } from '../api';
 import { formatDate } from '../utils';
+import { PageHeader } from '../components/common';
 
 export default function History() {
   const navigate = useNavigate();
   const [history, setHistory] = useState<GenerationHistory[]>([]);
   const [groupedHistory, setGroupedHistory] = useState<Record<string, GenerationHistory[]>>({});
+
+  const loadHistory = async () => {
+    try {
+      const response = await api.getHistory();
+      if (response.ok) {
+        const data = await response.json();
+        setHistory(data);
+      }
+    } catch (error) {
+      console.error('加载历史记录失败:', error);
+    }
+  };
 
   useEffect(() => {
     loadHistory();
@@ -41,25 +54,9 @@ export default function History() {
     setGroupedHistory(sortedGrouped);
   }, [history]);
 
-  const loadHistory = async () => {
-    try {
-      const response = await api.getHistory();
-      if (response.ok) {
-        const data = await response.json();
-        setHistory(data);
-      }
-    } catch (error) {
-      console.error('加载历史记录失败:', error);
-    }
-  };
-
   return (
     <>
-      <header className="h-16 px-8 flex items-center bg-white/50 backdrop-blur-sm border-b border-gray-100 sticky top-0 z-30">
-        <h1 className="text-xl font-bold text-gray-800 tracking-tight">
-          历史记录
-        </h1>
-      </header>
+      <PageHeader title="历史记录" statusColor="blue" />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-8 py-8">
         {Object.keys(groupedHistory).length === 0 ? (

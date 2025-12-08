@@ -1,18 +1,23 @@
-import { useState, useEffect, useRef } from 'react';
-import { ArrowRight, Loader2, X, User, Shirt, Info, Upload } from 'lucide-react';
-import GenerationCounter from '../components/GenerationCounter';
+import { useState, useEffect, useCallback } from 'react';
+import { ArrowRight, User, Shirt, Info } from 'lucide-react';
 import PlaceholderCard from '../components/PlaceholderCard';
 import Lightbox from '../components/Lightbox';
-import QuotaErrorAlert from '../components/QuotaErrorAlert';
-import ContactModal from '../components/ContactModal';
 import ImageContextMenu from '../components/ImageContextMenu';
-import HistoryImageGrid from '../components/HistoryImageGrid';
-import type { GenerationHistory } from '../type';
+import {
+  PageHeader,
+  ImageUploadZone,
+  GenerateButton,
+  HistorySection,
+  QuotaErrorHandler,
+} from '../components/common';
+import { useImageUpload } from '../hooks/useImageUpload';
+import type { GenerationHistory, GenerationTask } from '../type';
 import { GenerationType } from '../type';
 import { api } from '../api';
 import { useToast } from '../context/ToastContext';
 import { getImageAspectRatio } from '../utils/aspectRatio';
 import { getErrorMessage } from '../utils/errorHandler';
+import { useTaskRecovery } from '../hooks/useTaskRecovery';
 
 // 默认提示词
 const DEFAULT_PROMPT = '请你不要修改图一模特的姿势保持模特不变，将图一角色的衣服替换成图二的，需要符合图二衣服的上身逻辑';
@@ -28,14 +33,12 @@ interface SavedModel {
 
 export default function ClothingChange() {
   const toast = useToast();
-  const modelInputRef = useRef<HTMLInputElement>(null);
-  const clothingInputRef = useRef<HTMLInputElement>(null);
   
-  // 状态
-  const [modelFile, setModelFile] = useState<File | null>(null);
-  const [modelPreview, setModelPreview] = useState<string | null>(null);
-  const [clothingFile, setClothingFile] = useState<File | null>(null);
-  const [clothingPreview, setClothingPreview] = useState<string | null>(null);
+  // Use custom hooks for image upload management
+  const modelUpload = useImageUpload();
+  const clothingUpload = useImageUpload();
+  
+  // State
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -44,16 +47,11 @@ export default function ClothingChange() {
   const [showQuotaError, setShowQuotaError] = useState(false);
   const [showContact, setShowContact] = useState(false);
   const [history, setHistory] = useState<GenerationHistory[]>([]);
-  const [isDraggingModel, setIsDraggingModel] = useState(false);
-  const [isDraggingClothing, setIsDraggingClothing] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; url: string } | null>(null);
+  // Track if model preview is from saved models (not from file upload)
+  const [modelPreviewFromSaved, setModelPreviewFromSaved] = useState<string | null>(null);
 
-  // 加载历史记录
-  useEffect(() => {
-    loadHistory();
-  }, []);
-
-  const loadHistory = async () => {
+  const loadHistory = useCallback(async () => {
     try {
       const response = await api.getClothingChangeHistory();
       if (response.ok) {
@@ -63,9 +61,46 @@ export default function ClothingChange() {
     } catch (error) {
       console.error('加载换装历史失败:', error);
     }
-  };
+  }, []);
 
-  // 加载保存的模特图
+  // Task recovery callbacks - Requirements: 1.4, 1.5, 2.1
+  const handleTaskComplete = useCallback((task: GenerationTask) => {
+    console.log('[ClothingChange] Task completed:', task.task_id);
+    // Update generated image with the completed task's result
+    if (task.image_url) {
+      setGeneratedImage(task.image_url);
+    }
+    // Reload history to show the completed task
+    loadHistory();
+    // Refresh generation counter
+    setCounterRefresh(prev => prev + 1);
+    toast.success('换装生成完成！');
+  }, [loadHistory, toast]);
+
+  const handleTaskFailed = useCallback((task: GenerationTask) => {
+    console.log('[ClothingChange] Task failed:', task.task_id, task.error_msg);
+    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+    if (isQuotaError) {
+      setShowQuotaError(true);
+    } else {
+      toast.error('生成失败: ' + message);
+    }
+  }, [toast]);
+
+  // Use task recovery hook to restore in-progress tasks after page refresh
+  // Requirements: 1.4, 1.5, 2.1, 2.2, 2.3, 2.4
+  const { processingTasks, isRecovering } = useTaskRecovery({
+    type: GenerationType.CLOTHING_CHANGE,
+    onTaskComplete: handleTaskComplete,
+    onTaskFailed: handleTaskFailed,
+  });
+
+  // Load history on mount
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
+  // Load saved models from localStorage
   useEffect(() => {
     const saved = localStorage.getItem(SAVED_MODELS_KEY);
     if (saved) {
@@ -77,129 +112,27 @@ export default function ClothingChange() {
     }
   }, []);
 
-  // 清理预览 URL
-  useEffect(() => {
-    return () => {
-      if (modelPreview && !modelPreview.startsWith('data:')) {
-        URL.revokeObjectURL(modelPreview);
-      }
-      if (clothingPreview) {
-        URL.revokeObjectURL(clothingPreview);
-      }
-    };
-  }, [modelPreview, clothingPreview]);
+  // Get the effective model preview URL (from hook or saved model)
+  const effectiveModelPreview = modelUpload.previewUrl || modelPreviewFromSaved;
 
-  const handleModelSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (modelPreview && !savedModels.some(m => m.url === modelPreview)) {
-        URL.revokeObjectURL(modelPreview);
-      }
-      setModelFile(file);
-      setModelPreview(URL.createObjectURL(file));
-    }
-    e.target.value = '';
+  // Handle model file selection
+  const handleModelFileSelect = (file: File) => {
+    setModelPreviewFromSaved(null);
+    modelUpload.setFile(file);
   };
 
-  const handleClothingSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (clothingPreview) {
-        URL.revokeObjectURL(clothingPreview);
-      }
-      setClothingFile(file);
-      setClothingPreview(URL.createObjectURL(file));
-    }
-    e.target.value = '';
+  // Handle model clear
+  const handleModelClear = () => {
+    modelUpload.clear();
+    setModelPreviewFromSaved(null);
   };
 
-  // 从 URL 加载图片为 File 对象
-  const loadImageFromUrl = async (url: string): Promise<File | null> => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const fileName = `upload_${Date.now()}.${blob.type.split('/')[1] || 'png'}`;
-      return new File([blob], fileName, { type: blob.type });
-    } catch (error) {
-      console.error('加载图片失败:', error);
-      return null;
-    }
+  // Handle clothing file selection
+  const handleClothingFileSelect = (file: File) => {
+    clothingUpload.setFile(file);
   };
 
-  const handleDrop = (type: 'model' | 'clothing') => async (e: React.DragEvent) => {
-    e.preventDefault();
-    if (type === 'model') {
-      setIsDraggingModel(false);
-    } else {
-      setIsDraggingClothing(false);
-    }
-
-    // 首先检查是否有文件
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
-      if (type === 'model') {
-        if (modelPreview && !savedModels.some(m => m.url === modelPreview)) {
-          URL.revokeObjectURL(modelPreview);
-        }
-        setModelFile(file);
-        setModelPreview(URL.createObjectURL(file));
-      } else {
-        if (clothingPreview) {
-          URL.revokeObjectURL(clothingPreview);
-        }
-        setClothingFile(file);
-        setClothingPreview(URL.createObjectURL(file));
-      }
-      return;
-    }
-
-    // 检查是否是从应用内拖拽的图片 URL
-    const sigmaImageUrl = e.dataTransfer.getData('application/x-sigma-image');
-    const imageUrl = sigmaImageUrl || e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-    
-    if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('data:'))) {
-      const loadedFile = await loadImageFromUrl(imageUrl);
-      if (loadedFile) {
-        if (type === 'model') {
-          if (modelPreview && !savedModels.some(m => m.url === modelPreview)) {
-            URL.revokeObjectURL(modelPreview);
-          }
-          setModelFile(loadedFile);
-          setModelPreview(URL.createObjectURL(loadedFile));
-        } else {
-          if (clothingPreview) {
-            URL.revokeObjectURL(clothingPreview);
-          }
-          setClothingFile(loadedFile);
-          setClothingPreview(URL.createObjectURL(loadedFile));
-        }
-        toast.success('已添加图片');
-      } else {
-        toast.error('加载图片失败');
-      }
-    }
-  };
-
-  const handleDragOver = (type: 'model' | 'clothing') => (e: React.DragEvent) => {
-    e.preventDefault();
-    if (type === 'model') {
-      setIsDraggingModel(true);
-    } else {
-      setIsDraggingClothing(true);
-    }
-  };
-
-  const handleDragLeave = (type: 'model' | 'clothing') => (e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-    if (type === 'model') {
-      setIsDraggingModel(false);
-    } else {
-      setIsDraggingClothing(false);
-    }
-  };
-
-  // 右键菜单处理
+  // Context menu handling
   const handleContextMenu = (e: React.MouseEvent, url: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -216,52 +149,33 @@ export default function ClothingChange() {
     setContextMenu(null);
   };
 
-  const clearModel = () => {
-    if (modelPreview && !savedModels.some(m => m.url === modelPreview)) {
-      URL.revokeObjectURL(modelPreview);
-    }
-    setModelFile(null);
-    setModelPreview(null);
-  };
-
-  const clearClothing = () => {
-    if (clothingPreview) {
-      URL.revokeObjectURL(clothingPreview);
-    }
-    setClothingFile(null);
-    setClothingPreview(null);
-  };
-
-  // 保存当前模特图到收藏
+  // Save current model to favorites
   const saveCurrentModel = async () => {
-    if (!modelFile || !modelPreview) return;
+    if (!modelUpload.file || !modelUpload.previewUrl) return;
     
-    // 转换为 base64 存储
+    // Convert to base64 for storage
     const reader = new FileReader();
     reader.onload = () => {
       const newModel: SavedModel = {
         id: Date.now().toString(),
         url: reader.result as string,
-        name: modelFile.name,
+        name: modelUpload.file!.name,
       };
       const updated = [...savedModels, newModel];
       setSavedModels(updated);
       localStorage.setItem(SAVED_MODELS_KEY, JSON.stringify(updated));
       toast.success('模特图已保存');
     };
-    reader.readAsDataURL(modelFile);
+    reader.readAsDataURL(modelUpload.file);
   };
 
-  // 选择已保存的模特图
+  // Select a saved model
   const selectSavedModel = (model: SavedModel) => {
-    if (modelPreview && !savedModels.some(m => m.url === modelPreview)) {
-      URL.revokeObjectURL(modelPreview);
-    }
-    setModelFile(null); // 使用保存的图片时，file 为 null
-    setModelPreview(model.url);
+    modelUpload.clear();
+    setModelPreviewFromSaved(model.url);
   };
 
-  // 删除保存的模特图
+  // Delete a saved model
   const deleteSavedModel = (id: string) => {
     const updated = savedModels.filter(m => m.id !== id);
     setSavedModels(updated);
@@ -270,11 +184,11 @@ export default function ClothingChange() {
   };
 
   const handleGenerate = async () => {
-    if (!modelPreview) {
+    if (!effectiveModelPreview) {
       toast.warning('请先上传模特图');
       return;
     }
-    if (!clothingFile) {
+    if (!clothingUpload.file) {
       toast.warning('请先上传服装图');
       return;
     }
@@ -282,17 +196,17 @@ export default function ClothingChange() {
     setIsGenerating(true);
 
     try {
-      // 使用模特图的宽高比
+      // Use model image aspect ratio
       let aspectRatio = '1:1';
-      if (modelFile) {
-        aspectRatio = await getImageAspectRatio(modelFile);
-      } else if (modelPreview) {
-        // 如果是保存的模特图（base64），需要从 URL 获取
+      if (modelUpload.file) {
+        aspectRatio = await getImageAspectRatio(modelUpload.file);
+      } else if (modelPreviewFromSaved) {
+        // If using saved model (base64), get aspect ratio from URL
         const img = new Image();
         await new Promise<void>((resolve) => {
           img.onload = () => resolve();
           img.onerror = () => resolve();
-          img.src = modelPreview;
+          img.src = modelPreviewFromSaved;
         });
         if (img.width && img.height) {
           const { findClosestAspectRatio } = await import('../utils/aspectRatio');
@@ -306,33 +220,28 @@ export default function ClothingChange() {
       formData.append('imageSize', '2K');
       formData.append('type', GenerationType.CLOTHING_CHANGE);
 
-      // 添加模特图（第一张）
-      if (modelFile) {
-        formData.append('images', modelFile);
-      } else if (modelPreview) {
-        // 将 base64 转换为 File
-        const response = await fetch(modelPreview);
+      // Add model image (first image)
+      if (modelUpload.file) {
+        formData.append('images', modelUpload.file);
+      } else if (modelPreviewFromSaved) {
+        // Convert base64 to File
+        const response = await fetch(modelPreviewFromSaved);
         const blob = await response.blob();
         formData.append('images', blob, 'model.png');
       }
 
-      // 添加服装图（第二张）
-      formData.append('images', clothingFile);
+      // Add clothing image (second image)
+      formData.append('images', clothingUpload.file);
 
       const response = await api.generate(formData);
 
       if (!response.ok) {
         const errData = await response.json();
-        // 处理嵌套的错误格式: {"error": {"message": "..."}}
-        let errorMsg = '生成失败';
-        if (errData.error) {
-          if (typeof errData.error === 'string') {
-            errorMsg = errData.error;
-          } else if (typeof errData.error === 'object' && errData.error.message) {
-            errorMsg = errData.error.message;
-          } else {
-            errorMsg = JSON.stringify(errData.error);
-          }
+        // 使用统一的错误处理，根据状态码显示不同提示
+        const { message: errorMsg, isQuotaError } = getErrorMessage(errData, response.status);
+        if (isQuotaError) {
+          setShowQuotaError(true);
+          return;
         }
         throw new Error(errorMsg);
       }
@@ -359,21 +268,24 @@ export default function ClothingChange() {
     }
   };
 
+  const handleHistoryClick = (item: GenerationHistory) => {
+    setGeneratedImage(item.image_url);
+  };
+
   return (
     <>
-      {/* 头部 */}
-      <header className="h-14 px-6 flex items-center bg-white/80 backdrop-blur-md border-b border-gray-100 sticky top-0 z-30 justify-between">
-        <h1 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-          一键换装
-        </h1>
-        <GenerationCounter refreshTrigger={counterRefresh} />
-      </header>
+      {/* Header */}
+      <PageHeader
+        title="一键换装"
+        statusColor="purple"
+        showCounter
+        counterRefresh={counterRefresh}
+      />
 
-      {/* 主内容区 */}
+      {/* Main content area */}
       <div className="flex-1 overflow-y-auto bg-[#fafafa] p-6">
         <div className="max-w-6xl mx-auto">
-          {/* 提示信息 */}
+          {/* Tips info box */}
           <div className="mb-6 p-4 bg-purple-50 rounded-xl border border-purple-100">
             <div className="flex items-start gap-3">
               <Info className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
@@ -389,16 +301,16 @@ export default function ClothingChange() {
             </div>
           </div>
 
-          {/* 上传区域 */}
+          {/* Upload areas */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-            {/* 模特图上传 */}
+            {/* Model image upload */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                   <User className="w-4 h-4 text-purple-500" />
                   模特图（图一）
                 </h2>
-                {modelFile && (
+                {modelUpload.file && (
                   <button
                     onClick={saveCurrentModel}
                     className="text-xs text-purple-600 hover:text-purple-700"
@@ -408,64 +320,45 @@ export default function ClothingChange() {
                 )}
               </div>
               
-              <input
-                ref={modelInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleModelSelect}
-                className="hidden"
-              />
-
-              {!modelPreview ? (
-                <div
-                  onClick={() => modelInputRef.current?.click()}
-                  onDrop={handleDrop('model')}
-                  onDragOver={handleDragOver('model')}
-                  onDragLeave={handleDragLeave('model')}
-                  className={`aspect-[3/4] rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all group relative ${
-                    isDraggingModel
-                      ? 'border-purple-500 bg-purple-50 ring-2 ring-purple-500'
-                      : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50/30'
-                  }`}
-                >
-                  {isDraggingModel && (
-                    <div className="absolute inset-0 z-10 rounded-xl bg-purple-50/90 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-                      <div className="flex flex-col items-center text-purple-500 animate-bounce">
-                        <Upload className="w-6 h-6 mb-2" />
-                        <span className="font-medium text-sm">释放上传</span>
-                      </div>
-                    </div>
-                  )}
-                  <div className="w-14 h-14 rounded-2xl bg-gray-100 group-hover:bg-purple-100 flex items-center justify-center mb-3 transition-all">
-                    <User className="w-7 h-7 text-gray-400 group-hover:text-purple-500 transition-all" />
-                  </div>
-                  <p className="text-sm text-gray-500 mb-1">上传模特图</p>
-                  <p className="text-xs text-gray-400">点击或拖拽</p>
-                </div>
+              {/* Custom upload zone for model - need to handle saved models */}
+              {!effectiveModelPreview ? (
+                <ImageUploadZone
+                  file={modelUpload.file}
+                  previewUrl={modelUpload.previewUrl}
+                  onFileSelect={handleModelFileSelect}
+                  onClear={handleModelClear}
+                  onPreview={setLightboxImage}
+                  onContextMenu={handleContextMenu}
+                  aspectRatio="3:4"
+                  icon={<User className="w-7 h-7 text-gray-400 group-hover:text-purple-500 transition-all" />}
+                  emptyTitle="上传模特图"
+                  emptySubtitle="点击或拖拽"
+                  accentColor="purple"
+                />
               ) : (
                 <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-gray-100">
                   <img
-                    src={modelPreview}
+                    src={effectiveModelPreview}
                     alt="模特图"
                     className="w-full h-full object-cover cursor-pointer"
                     draggable
-                    onClick={() => setLightboxImage(modelPreview)}
-                    onContextMenu={(e) => handleContextMenu(e, modelPreview)}
+                    onClick={() => setLightboxImage(effectiveModelPreview)}
+                    onContextMenu={(e) => handleContextMenu(e, effectiveModelPreview)}
                     onDragStart={(e) => {
-                      e.dataTransfer.setData('application/x-sigma-image', modelPreview);
+                      e.dataTransfer.setData('application/x-sigma-image', effectiveModelPreview);
                       e.dataTransfer.effectAllowed = 'copy';
                     }}
                   />
                   <button
-                    onClick={clearModel}
+                    onClick={handleModelClear}
                     className="absolute top-2 right-2 w-7 h-7 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-all"
                   >
-                    <X className="w-4 h-4" />
+                    <span className="text-sm">×</span>
                   </button>
                 </div>
               )}
 
-              {/* 已保存的模特图 */}
+              {/* Saved models */}
               {savedModels.length > 0 && (
                 <div className="mt-4">
                   <p className="text-xs text-gray-500 mb-2">已保存的模特图</p>
@@ -497,78 +390,45 @@ export default function ClothingChange() {
               )}
             </div>
 
-            {/* 服装图上传 */}
+            {/* Clothing image upload */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <h2 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
                 <Shirt className="w-4 h-4 text-blue-500" />
                 服装图（图二）
               </h2>
               
-              <input
-                ref={clothingInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleClothingSelect}
-                className="hidden"
+              <ImageUploadZone
+                file={clothingUpload.file}
+                previewUrl={clothingUpload.previewUrl}
+                onFileSelect={handleClothingFileSelect}
+                onClear={clothingUpload.clear}
+                onPreview={setLightboxImage}
+                onContextMenu={handleContextMenu}
+                aspectRatio="3:4"
+                icon={<Shirt className="w-7 h-7 text-gray-400 group-hover:text-blue-500 transition-all" />}
+                emptyTitle="上传服装图"
+                emptySubtitle="点击或拖拽"
+                accentColor="blue"
               />
-
-              {!clothingPreview ? (
-                <div
-                  onClick={() => clothingInputRef.current?.click()}
-                  onDrop={handleDrop('clothing')}
-                  onDragOver={handleDragOver('clothing')}
-                  onDragLeave={handleDragLeave('clothing')}
-                  className={`aspect-[3/4] rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all group relative ${
-                    isDraggingClothing
-                      ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500'
-                      : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/30'
-                  }`}
-                >
-                  {isDraggingClothing && (
-                    <div className="absolute inset-0 z-10 rounded-xl bg-blue-50/90 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-                      <div className="flex flex-col items-center text-blue-500 animate-bounce">
-                        <Upload className="w-6 h-6 mb-2" />
-                        <span className="font-medium text-sm">释放上传</span>
-                      </div>
-                    </div>
-                  )}
-                  <div className="w-14 h-14 rounded-2xl bg-gray-100 group-hover:bg-blue-100 flex items-center justify-center mb-3 transition-all">
-                    <Shirt className="w-7 h-7 text-gray-400 group-hover:text-blue-500 transition-all" />
-                  </div>
-                  <p className="text-sm text-gray-500 mb-1">上传服装图</p>
-                  <p className="text-xs text-gray-400">点击或拖拽</p>
-                </div>
-              ) : (
-                <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-gray-100">
-                  <img
-                    src={clothingPreview}
-                    alt="服装图"
-                    className="w-full h-full object-cover cursor-pointer"
-                    draggable
-                    onClick={() => setLightboxImage(clothingPreview)}
-                    onContextMenu={(e) => handleContextMenu(e, clothingPreview)}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('application/x-sigma-image', clothingPreview);
-                      e.dataTransfer.effectAllowed = 'copy';
-                    }}
-                  />
-                  <button
-                    onClick={clearClothing}
-                    className="absolute top-2 right-2 w-7 h-7 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-all"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
             </div>
 
-            {/* 生成结果 */}
+            {/* Generated result */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <h2 className="text-sm font-semibold text-gray-700 mb-4">生成结果</h2>
               
-              {isGenerating ? (
-                <div className="aspect-[3/4] flex items-center justify-center">
+              {/* Show recovering state - Requirement 1.4 */}
+              {isRecovering ? (
+                <div className="aspect-[3/4] flex flex-col items-center justify-center text-gray-400">
+                  <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                  <p className="text-sm text-gray-500">正在恢复任务状态...</p>
+                </div>
+              ) : isGenerating || processingTasks.length > 0 ? (
+                /* Show loading state for generating or recovered processing tasks - Requirement 2.1 */
+                <div className="aspect-[3/4] flex flex-col items-center justify-center">
                   <PlaceholderCard />
+                  {processingTasks.length > 0 && (
+                    <p className="text-xs text-purple-500 mt-2">正在生成中...</p>
+                  )}
                 </div>
               ) : generatedImage ? (
                 <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-gray-100">
@@ -596,57 +456,47 @@ export default function ClothingChange() {
             </div>
           </div>
 
-          {/* 生成按钮 */}
+          {/* Generate button */}
           <div className="flex justify-center mb-8">
-            <button
+            <GenerateButton
               onClick={handleGenerate}
-              disabled={!modelPreview || !clothingFile || isGenerating}
-              className="px-12 py-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-purple-200 disabled:shadow-none"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  生成中...
-                </>
-              ) : (
-                <>
-                  <ArrowRight className="w-5 h-5" />
-                  开始换装
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* 历史记录区域 */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-sm font-semibold text-gray-700 mb-4">换装历史记录</h2>
-            <HistoryImageGrid
-              history={history}
-              onImageClick={(item) => setGeneratedImage(item.image_url)}
-              onImagePreview={setLightboxImage}
-              emptyText="暂无换装生成记录"
+              isGenerating={isGenerating}
+              disabled={!effectiveModelPreview || !clothingUpload.file}
+              text="开始换装"
+              loadingText="生成中..."
+              icon={<ArrowRight className="w-5 h-5" />}
+              color="purple"
+              className="px-12 py-4"
             />
           </div>
+
+          {/* History section */}
+          <HistorySection
+            title="换装历史记录"
+            history={history}
+            onImageClick={handleHistoryClick}
+            onImagePreview={setLightboxImage}
+            emptyText="暂无换装生成记录"
+          />
         </div>
       </div>
 
-      {/* 图片灯箱 */}
+      {/* Image lightbox */}
       <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
       
-      {/* 配额耗尽错误弹窗 */}
-      <QuotaErrorAlert
-        isOpen={showQuotaError}
-        onClose={() => setShowQuotaError(false)}
+      {/* Quota error handler */}
+      <QuotaErrorHandler
+        showQuotaError={showQuotaError}
+        showContact={showContact}
+        onQuotaErrorClose={() => setShowQuotaError(false)}
+        onContactClose={() => setShowContact(false)}
         onContactSales={() => {
           setShowQuotaError(false);
           setShowContact(true);
         }}
       />
-      
-      {/* 联系销售弹窗 */}
-      <ContactModal isOpen={showContact} onClose={() => setShowContact(false)} />
 
-      {/* 右键菜单 */}
+      {/* Context menu */}
       <ImageContextMenu
         imageUrl={contextMenu?.url || ''}
         position={contextMenu ? { x: contextMenu.x, y: contextMenu.y } : null}

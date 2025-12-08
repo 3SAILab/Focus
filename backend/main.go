@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -23,32 +24,39 @@ import (
 )
 
 func main() {
-	// 创建启动日志文件用于调试
-	startupLogPath := "startup.log"
-	if logDir := os.Getenv("LOG_DIR"); logDir != "" {
-		startupLogPath = filepath.Join(logDir, "startup.log")
-	}
-	startupLog, logErr := os.OpenFile(startupLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if logErr == nil {
-		defer startupLog.Close()
-		log.SetOutput(startupLog)
-		log.Println("========================================")
-		log.Println("Backend starting at:", time.Now())
-		if wd, wdErr := os.Getwd(); wdErr == nil {
-			log.Println("Working directory:", wd)
-		}
-		log.Println("========================================")
-	}
-	
 	_ = godotenv.Load()
 
 	// 初始化配置
 	config.Init()
 	
-	// 记录配置信息
-	log.Println("========================================")
-	log.Println("SIGMA Backend 启动中...")
-	log.Println("========================================")
+	// 生产环境禁用日志输出
+	if config.IsProduction {
+		log.SetOutput(io.Discard)
+		gin.SetMode(gin.ReleaseMode)
+	} else {
+		// 开发环境：创建启动日志文件用于调试
+		startupLogPath := "startup.log"
+		if logDir := os.Getenv("LOG_DIR"); logDir != "" {
+			startupLogPath = filepath.Join(logDir, "startup.log")
+		}
+		startupLog, logErr := os.OpenFile(startupLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if logErr == nil {
+			defer startupLog.Close()
+			log.SetOutput(startupLog)
+			log.Println("========================================")
+			log.Println("Backend starting at:", time.Now())
+			if wd, wdErr := os.Getwd(); wdErr == nil {
+				log.Println("Working directory:", wd)
+			}
+			log.Println("========================================")
+		}
+		
+		// 记录配置信息
+		log.Println("========================================")
+		log.Println("SIGMA Backend 启动中...")
+		log.Println("========================================")
+	}
+	
 	config.LogConfig()
 
 	// 创建必要的目录
@@ -79,7 +87,15 @@ func main() {
 	if err != nil {
 		log.Fatal("无法连接数据库:", err)
 	}
-	config.DB.AutoMigrate(&models.GenerationHistory{}, &models.GenerationStats{})
+	config.DB.AutoMigrate(&models.GenerationHistory{}, &models.GenerationStats{}, &models.GenerationTask{})
+
+	// 启动时清理超时的任务
+	cleanedCount, cleanErr := handlers.CleanupStaleTasks()
+	if cleanErr != nil {
+		log.Printf("警告: 清理超时任务失败: %v", cleanErr)
+	} else if cleanedCount > 0 {
+		log.Printf("✓ 已清理 %d 个超时任务", cleanedCount)
+	}
 
 	// 创建 Gin 路由
 	r := gin.Default()
@@ -121,6 +137,10 @@ func main() {
 	
 	// 换装历史接口
 	r.GET("/history/clothing-change", handlers.ClothingChangeHistoryHandler)
+	
+	// 任务管理接口
+	r.GET("/tasks/processing", handlers.GetProcessingTasks)
+	r.GET("/tasks/:id", handlers.GetTaskStatus)
 
 	// 确定实际使用的端口
 	var actualPort int

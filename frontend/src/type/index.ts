@@ -5,6 +5,8 @@ export const GenerationType = {
   CREATE: 'create',
   WHITE_BACKGROUND: 'white_background',
   CLOTHING_CHANGE: 'clothing_change',
+  PRODUCT_SCENE: 'product_scene',
+  LIGHT_SHADOW: 'light_shadow',
 } as const;
 
 export type GenerationTypeValue = typeof GenerationType[keyof typeof GenerationType];
@@ -53,3 +55,21 @@ export type AspectRatio =
 
 export type ImageSize = '2K';
 
+
+// Task status type
+export type TaskStatus = 'processing' | 'completed' | 'failed';
+
+// Generation task interface (matches backend TaskResponse)
+export interface GenerationTask {
+  id: number;
+  task_id: string;
+  status: TaskStatus;
+  type: GenerationTypeValue;
+  prompt: string;
+  ref_images: string; // JSON array of ref image URLs
+  image_url: string;
+  error_msg: string;
+  started_at: string;
+  created_at: string;
+  updated_at: string;
+}

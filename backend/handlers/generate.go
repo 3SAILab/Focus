@@ -13,9 +13,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"sigma/config"
 	"sigma/models"
 	"sigma/types"
-	"sigma/config"
 	"sigma/utils"
 )
 
@@ -77,6 +78,22 @@ func GenerateHandler(c *gin.Context) {
 		}
 	}
 
+	// 创建任务记录 - 在调用 AI API 之前
+	taskID := uuid.New().String()
+	refImagesJSON, _ := json.Marshal(savedRefImages)
+	task := models.GenerationTask{
+		TaskID:    taskID,
+		Status:    models.TaskStatusProcessing,
+		Type:      generationType,
+		Prompt:    prompt,
+		RefImages: string(refImagesJSON),
+		StartedAt: time.Now(),
+	}
+	if result := config.DB.Create(&task); result.Error != nil {
+		c.JSON(500, gin.H{"error": "创建任务失败"})
+		return
+	}
+
 	payloadObj := types.GeminiRequest{
 		Contents: []types.Content{{Role: "user", Parts: parts}},
 		GenerationConfig: types.GenerationConfig{
@@ -95,10 +112,14 @@ func GenerateHandler(c *gin.Context) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	// 增加超时时间到 120 秒，因为 AI 图片生成可能需要较长时间
+	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		// 更新任务状态为失败
+		task.FailTask(err.Error())
+		config.DB.Save(&task)
+		c.JSON(500, gin.H{"error": err.Error(), "task_id": taskID})
 		return
 	}
 	defer resp.Body.Close()
@@ -108,22 +129,33 @@ func GenerateHandler(c *gin.Context) {
 	if err := json.Unmarshal(respBody, &respMap); err == nil {
 		// 先打印结构（不含 base64 数据）
 		utils.LogJSON("Generate Response", respMap)
-		// 打印原始结构的 key 路径，帮助调试
-		utils.LogResponseStructure("Response Structure", respMap)
+		// 打印原始结构的 key 路径，帮助调试（包含状态码）
+		utils.LogResponseStructureWithStatus("Response Structure", respMap, resp.StatusCode)
 	} else {
-		fmt.Printf("\n====== [Generate Response Raw] ======\n%s\n=====================================\n", string(respBody))
+		fmt.Printf("\n====== [Generate Response Raw] ======\nStatus Code: %d\n%s\n=====================================\n", resp.StatusCode, string(respBody))
 	}
 
-	// 首先检查是否是 API 错误响应
-	var apiError struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(respBody, &apiError); err == nil && apiError.Error.Message != "" {
-		// API 返回了错误，直接将错误传递给前端
-		c.JSON(500, gin.H{"error": apiError.Error.Message})
+	// 首先检查是否是 API 错误响应（非 200 状态码）
+	if resp.StatusCode != 200 {
+		var apiError struct {
+			Error struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
+		}
+		errorMessage := fmt.Sprintf("API 请求失败，状态码: %d", resp.StatusCode)
+		if err := json.Unmarshal(respBody, &apiError); err == nil && apiError.Error.Message != "" {
+			errorMessage = apiError.Error.Message
+		}
+		// API 返回了错误，更新任务状态为失败
+		task.FailTask(errorMessage)
+		config.DB.Save(&task)
+		// 返回上游 API 的状态码，让前端可以根据状态码显示不同提示
+		c.JSON(resp.StatusCode, gin.H{
+			"error":       errorMessage,
+			"task_id":     taskID,
+			"status_code": resp.StatusCode,
+		})
 		return
 	}
 
@@ -131,7 +163,10 @@ func GenerateHandler(c *gin.Context) {
 	json.Unmarshal(respBody, &geminiResp)
 
 	if len(geminiResp.Candidates) == 0 {
-		c.JSON(500, gin.H{"error": "模型未返回内容", "raw": string(respBody)})
+		// 更新任务状态为失败
+		task.FailTask("模型未返回内容")
+		config.DB.Save(&task)
+		c.JSON(500, gin.H{"error": "模型未返回内容", "raw": string(respBody), "task_id": taskID})
 		return
 	}
 
@@ -150,8 +185,6 @@ func GenerateHandler(c *gin.Context) {
 				os.WriteFile(savePath, imgData, 0644)
 
 				finalImageURL = fmt.Sprintf("%s/images/%s", utils.GetBaseURL(config.ServerPort), fileName)
-
-				refImagesJSON, _ := json.Marshal(savedRefImages)
 
 				newRecord := models.GenerationHistory{
 					Prompt:    prompt,
@@ -177,12 +210,21 @@ func GenerateHandler(c *gin.Context) {
 	}
 
 	if finalImageURL == "" {
-		c.JSON(500, gin.H{"error": "未生成图片", "details": finalExplain})
+		// 更新任务状态为失败
+		errorMsg := "图片生成失败，请重试"
+		task.FailTask(errorMsg)
+		config.DB.Save(&task)
+		c.JSON(500, gin.H{"error": errorMsg, "details": finalExplain, "task_id": taskID})
 		return
 	}
 
+	// 更新任务状态为完成
+	task.CompleteTask(finalImageURL)
+	config.DB.Save(&task)
+
 	c.JSON(200, gin.H{
 		"status":     "success",
+		"task_id":    taskID,
 		"image_url":  finalImageURL,
 		"text":       finalExplain,
 		"ref_images": savedRefImages,

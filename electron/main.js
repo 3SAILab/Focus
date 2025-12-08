@@ -26,6 +26,15 @@ const originalWarn = console.warn;
 
 // Initialize logging function (will be called after app.whenReady())
 function initializeLogging() {
+  // 生产环境：禁用所有日志输出
+  if (!isDev) {
+    console.log = function() {};
+    console.error = function() {};
+    console.warn = function() {};
+    return;
+  }
+  
+  // 开发环境：保持日志输出并写入文件
   console.log = function(...args) {
     const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
     const timestamp = new Date().toISOString();
@@ -411,7 +420,8 @@ function checkBackendHealth(retryCount = 0) {
 function createWindow() {
   console.log('[Window] 创建主窗口...');
   
-  const iconPath = path.join(__dirname, '..', 'assets', 'icon.png');
+  // 使用 focus.ico 作为应用图标
+  const iconPath = path.join(__dirname, '..', 'assets', 'focus.ico');
   const windowOptions = {
     width: 1400,
     height: 900,
@@ -420,7 +430,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: false,  // 禁用 web 安全策略，解决跨域和本地文件加载问题
-      devTools: true,      // 确保开发者工具可用
+      devTools: isDev,     // 仅在开发模式下启用开发者工具
     },
   };
   
@@ -442,8 +452,6 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
     console.log('[Window] 开发者工具已打开');
   } else {
-    // 生产环境也打开 devtools 用于调试
-    mainWindow.webContents.openDevTools();
     // 生产环境加载打包后的文件
     // In production, files are in app.asar, use app.getAppPath()
     const appPath = app.getAppPath();
@@ -504,10 +512,25 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
   }
 });
 
+// 获取应用数据目录（使用安装路径而不是 AppData）
+function getAppDataPath() {
+  if (isDev) {
+    // 开发模式：使用项目根目录下的 data 文件夹
+    return path.join(__dirname, '..', 'data');
+  } else {
+    // 生产模式：使用安装目录下的 data 文件夹
+    // process.resourcesPath 指向 resources 目录，向上一级就是安装目录
+    const installDir = path.dirname(process.resourcesPath);
+    return path.join(installDir, 'data');
+  }
+}
+
 app.whenReady().then(async () => {
   // Initialize environment detection and paths
   isDev = !app.isPackaged;
-  userDataPath = app.getPath('userData');
+  
+  // 使用安装路径下的 data 目录，而不是 AppData
+  userDataPath = getAppDataPath();
   
   // Ensure user data directory exists
   if (!fs.existsSync(userDataPath)) {
@@ -529,6 +552,7 @@ app.whenReady().then(async () => {
   console.log('[App] Is packaged:', app.isPackaged);
   console.log('[App] Development mode:', isDev);
   console.log('[App] User data directory:', userDataPath);
+  console.log('[App] Install directory:', isDev ? 'N/A (dev mode)' : path.dirname(process.resourcesPath));
   console.log('[App] Log file path:', logPath);
   
   try {

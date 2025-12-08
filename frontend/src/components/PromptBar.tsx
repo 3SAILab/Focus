@@ -5,6 +5,7 @@ import AspectRatioSelector, { aspectRatiosConfig } from './AspectRatioSelector';
 import type { AspectRatio, GenerateResponse } from '../type';
 import { api } from '../api';
 import { useToast } from '../context/ToastContext';
+import { getErrorMessage } from '../utils/errorHandler';
 
 interface PromptBarProps {
   onGenerate: (response: GenerateResponse) => void;
@@ -83,17 +84,8 @@ export default function PromptBar({
 
             if (!response.ok) {
               const errData = await response.json();
-              // 处理嵌套的错误格式: {"error": {"message": "..."}}
-              let errorMsg = '服务器错误';
-              if (errData.error) {
-                if (typeof errData.error === 'string') {
-                  errorMsg = errData.error;
-                } else if (typeof errData.error === 'object' && errData.error.message) {
-                  errorMsg = errData.error.message;
-                } else {
-                  errorMsg = JSON.stringify(errData.error);
-                }
-              }
+              // 使用统一的错误处理，根据状态码显示不同提示
+              const { message: errorMsg } = getErrorMessage(errData, response.status);
               throw new Error(errorMsg);
             }
 
@@ -270,17 +262,8 @@ export default function PromptBar({
 
       if (!response.ok) {
         const errData = await response.json();
-        // 处理嵌套的错误格式: {"error": {"message": "..."}}
-        let errorMsg = '服务器错误';
-        if (errData.error) {
-          if (typeof errData.error === 'string') {
-            errorMsg = errData.error;
-          } else if (typeof errData.error === 'object' && errData.error.message) {
-            errorMsg = errData.error.message;
-          } else {
-            errorMsg = JSON.stringify(errData.error);
-          }
-        }
+        // 使用统一的错误处理，根据状态码显示不同提示
+        const { message: errorMsg } = getErrorMessage(errData, response.status);
         throw new Error(errorMsg);
       }
 
