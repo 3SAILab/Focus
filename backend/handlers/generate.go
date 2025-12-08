@@ -42,6 +42,12 @@ func GenerateHandler(c *gin.Context) {
 	if imageSize == "" {
 		imageSize = "2K"
 	}
+	
+	// 获取生成类型，默认为创作空间
+	generationType := c.PostForm("type")
+	if generationType == "" {
+		generationType = models.GenerationTypeCreate
+	}
 
 	parts := []types.Part{{Text: prompt}}
 	var savedRefImages []string
@@ -100,9 +106,25 @@ func GenerateHandler(c *gin.Context) {
 
 	var respMap map[string]interface{}
 	if err := json.Unmarshal(respBody, &respMap); err == nil {
+		// 先打印结构（不含 base64 数据）
 		utils.LogJSON("Generate Response", respMap)
+		// 打印原始结构的 key 路径，帮助调试
+		utils.LogResponseStructure("Response Structure", respMap)
 	} else {
 		fmt.Printf("\n====== [Generate Response Raw] ======\n%s\n=====================================\n", string(respBody))
+	}
+
+	// 首先检查是否是 API 错误响应
+	var apiError struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &apiError); err == nil && apiError.Error.Message != "" {
+		// API 返回了错误，直接将错误传递给前端
+		c.JSON(500, gin.H{"error": apiError.Error.Message})
+		return
 	}
 
 	var geminiResp types.GeminiResponse
@@ -136,8 +158,20 @@ func GenerateHandler(c *gin.Context) {
 					ImageURL:  finalImageURL,
 					FileName:  fileName,
 					RefImages: string(refImagesJSON),
+					Type:      generationType,
 				}
 				config.DB.Create(&newRecord)
+				
+				// 增加生成计数
+				var stats models.GenerationStats
+				result := config.DB.First(&stats)
+				if result.Error != nil {
+					stats = models.GenerationStats{TotalCount: 1}
+					config.DB.Create(&stats)
+				} else {
+					stats.TotalCount++
+					config.DB.Save(&stats)
+				}
 			}
 		}
 	}

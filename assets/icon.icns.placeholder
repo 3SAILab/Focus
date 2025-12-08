@@ -1,0 +1,19 @@
+PLACEHOLDER FILE - Replace with actual icon.icns
+
+This is a placeholder for the macOS icon file.
+
+To create the actual icon.icns file:
+
+1. Create a high-resolution PNG image (1024x1024 recommended) with transparent background
+2. Use one of these tools to convert to .icns:
+   - Image2Icon (https://img2icnsapp.com/) - macOS app
+   - iconutil (built-in macOS command-line tool)
+   - Online converter: https://cloudconvert.com/png-to-icns
+
+3. Replace this placeholder file with the actual icon.icns file
+4. Remove the .placeholder extension
+
+Required sizes in the .icns file:
+- 16x16, 32x32, 64x64, 128x128, 256x256, 512x512, 1024x1024
+
+For more information, see README.md in this directory.

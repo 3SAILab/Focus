@@ -1,14 +1,29 @@
 // 类型定义
 
+// 生成类型常量
+export const GenerationType = {
+  CREATE: 'create',
+  WHITE_BACKGROUND: 'white_background',
+  CLOTHING_CHANGE: 'clothing_change',
+} as const;
+
+export type GenerationTypeValue = typeof GenerationType[keyof typeof GenerationType];
+
 export interface GenerationHistory {
   id?: number;
   prompt: string;
-  original_prompt?: string; // [!code ++] 新增这一行
+  original_prompt?: string;
   image_url: string;
   file_name: string;
   ref_images?: string; // JSON 字符串数组
+  type?: GenerationTypeValue; // 生成类型
   created_at: string;
   updated_at?: string;
+}
+
+// 生成统计
+export interface GenerationStats {
+  total_count: number;
 }
 
 export interface GenerateRequest {

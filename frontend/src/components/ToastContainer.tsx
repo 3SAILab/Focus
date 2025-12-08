@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import ToastItem, { type Toast } from './Toast';
 
 interface ToastContainerProps {

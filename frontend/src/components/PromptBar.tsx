@@ -83,7 +83,18 @@ export default function PromptBar({
 
             if (!response.ok) {
               const errData = await response.json();
-              throw new Error(errData.error || '服务器错误');
+              // 处理嵌套的错误格式: {"error": {"message": "..."}}
+              let errorMsg = '服务器错误';
+              if (errData.error) {
+                if (typeof errData.error === 'string') {
+                  errorMsg = errData.error;
+                } else if (typeof errData.error === 'object' && errData.error.message) {
+                  errorMsg = errData.error.message;
+                } else {
+                  errorMsg = JSON.stringify(errData.error);
+                }
+              }
+              throw new Error(errorMsg);
             }
 
             const data: GenerateResponse = await response.json();
@@ -172,14 +183,28 @@ export default function PromptBar({
     setIsDragging(false);
   };
 
+  // 从 URL 加载图片为 File 对象
+  const loadImageFromUrl = async (url: string): Promise<File | null> => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const fileName = `ref_${Date.now()}.${blob.type.split('/')[1] || 'png'}`;
+      return new File([blob], fileName, { type: blob.type });
+    } catch (error) {
+      console.error('加载图片失败:', error);
+      return null;
+    }
+  };
+
   // 处理拖拽释放
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
 
     if (isGenerating) return;
 
+    // 首先检查是否有文件
     const droppedFiles = Array.from(e.dataTransfer.files).filter(f => 
       f.type.startsWith('image/')
     );
@@ -187,7 +212,36 @@ export default function PromptBar({
     if (droppedFiles.length > 0) {
       updateFiles([...files, ...droppedFiles]);
       toast.success(`已添加 ${droppedFiles.length} 张图片`);
-    } else if (e.dataTransfer.files.length > 0) {
+      return;
+    }
+
+    // 检查是否是从应用内拖拽的图片 URL
+    const sigmaImageUrl = e.dataTransfer.getData('application/x-sigma-image');
+    if (sigmaImageUrl) {
+      const file = await loadImageFromUrl(sigmaImageUrl);
+      if (file) {
+        updateFiles([...files, file]);
+        toast.success('已添加参考图');
+      } else {
+        toast.error('加载图片失败');
+      }
+      return;
+    }
+
+    // 检查是否是普通的图片 URL
+    const imageUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+    if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
+      const file = await loadImageFromUrl(imageUrl);
+      if (file) {
+        updateFiles([...files, file]);
+        toast.success('已添加参考图');
+      } else {
+        toast.error('加载图片失败');
+      }
+      return;
+    }
+
+    if (e.dataTransfer.files.length > 0) {
       toast.warning('只能上传图片文件');
     }
   };
@@ -216,7 +270,18 @@ export default function PromptBar({
 
       if (!response.ok) {
         const errData = await response.json();
-        throw new Error(errData.error || '服务器错误');
+        // 处理嵌套的错误格式: {"error": {"message": "..."}}
+        let errorMsg = '服务器错误';
+        if (errData.error) {
+          if (typeof errData.error === 'string') {
+            errorMsg = errData.error;
+          } else if (typeof errData.error === 'object' && errData.error.message) {
+            errorMsg = errData.error.message;
+          } else {
+            errorMsg = JSON.stringify(errData.error);
+          }
+        }
+        throw new Error(errorMsg);
       }
 
       const data: GenerateResponse = await response.json();

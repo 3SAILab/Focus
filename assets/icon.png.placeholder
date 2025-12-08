@@ -1,0 +1,20 @@
+PLACEHOLDER FILE - Replace with actual icon.png
+
+This is a placeholder for the Linux icon file.
+
+To create the actual icon.png file:
+
+1. Create a high-resolution PNG image with transparent background
+   - Recommended size: 512x512 or 1024x1024
+   - Format: PNG with alpha channel (transparency)
+
+2. Save as icon.png in this directory
+3. Remove this placeholder file
+
+Design tips for Linux icons:
+- Use simple, recognizable design
+- Ensure good visibility at small sizes
+- High contrast works well
+- Test on both light and dark backgrounds
+
+For more information, see README.md in this directory.

@@ -6,6 +6,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// GenerationType 生成类型常量
+const (
+	GenerationTypeCreate          = "create"           // 创作空间生成
+	GenerationTypeWhiteBackground = "white_background" // 白底图生成
+	GenerationTypeClothingChange  = "clothing_change"  // 换装生成
+)
+
 // GenerationHistory 数据库模型
 type GenerationHistory struct {
 	gorm.Model
@@ -14,6 +21,7 @@ type GenerationHistory struct {
 	ImageURL       string `json:"image_url"`
 	FileName       string `json:"file_name"`
 	RefImages      string `json:"ref_images"`
+	Type           string `json:"type" gorm:"default:create"` // 生成类型: create | white_background
 }
 
 // GenerationHistoryResponse 响应结构体
@@ -24,6 +32,7 @@ type GenerationHistoryResponse struct {
 	ImageURL       string    `json:"image_url"`
 	FileName       string    `json:"file_name"`
 	RefImages      string    `json:"ref_images"`
+	Type           string    `json:"type"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

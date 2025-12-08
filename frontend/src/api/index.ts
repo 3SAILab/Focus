@@ -5,18 +5,18 @@
 // 动态获取 API 地址
 const getApiBaseUrl = async (): Promise<string> => {
   // 在 Electron 环境中，从 window.electronAPI 获取
-  if (typeof window !== 'undefined' && (window as any).electronAPI) {
+  if (typeof window !== 'undefined' && window.electronAPI) {
     try {
-      const url = await (window as any).electronAPI.getBackendUrl();
-      return url || 'http://localhost:8080';
+      const url = await window.electronAPI.getBackendUrl();
+      return url || 'https://localhost:8080';
     } catch (error) {
       console.warn('获取 Electron API URL 失败，使用默认值:', error);
-      return 'http://localhost:8080';
+      return 'https://localhost:8080';
     }
   
   }
   // 开发环境或浏览器环境
-  return import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+  return import.meta.env.VITE_BACKEND_URL || 'https://localhost:8080';
 };
 
 // 缓存 API URL（避免每次都调用异步函数）
@@ -65,6 +65,50 @@ export const api = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ api_key: key }),
+    });
+  },
+
+  // 获取生成计数
+  async getGenerationCount(): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/stats/generation-count`, {
+      method: 'GET',
+    });
+  },
+
+  // 增加生成计数
+  async incrementGenerationCount(): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/stats/increment-count`, {
+      method: 'POST',
+    });
+  },
+
+  // 获取白底图历史记录
+  async getWhiteBackgroundHistory(): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/history/white-background`, {
+      method: 'GET',
+    });
+  },
+
+  // 获取换装历史记录
+  async getClothingChangeHistory(): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/history/clothing-change`, {
+      method: 'GET',
+    });
+  },
+
+  // 设置免责声明同意状态
+  async setDisclaimerAgreed(agreed: boolean): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/config/disclaimer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ agreed }),
     });
   },
 };

@@ -43,7 +43,7 @@ export default function ImageUpload({
   };
 
   // 保持之前的尺寸逻辑
-  const CARD_WIDTH = 56; // w-14
+  // const CARD_WIDTH = 56; // w-14
   const STEP = 60; 
   const BASE_WIDTH = 64;
 

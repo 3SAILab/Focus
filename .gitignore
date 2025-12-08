@@ -80,6 +80,10 @@ out/
 *.rpm
 *.snap
 
+release*
+dist-*
+uploads*
+
 # Electron builder
 electron-builder.yml
 

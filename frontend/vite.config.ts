@@ -5,6 +5,7 @@ import portDiscoveryPlugin from './vite-plugin-port-discovery'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',  // 使用相对路径，解决 Electron 中 file:// 协议的资源加载问题
   plugins: [
     react(),
     tailwindcss(),

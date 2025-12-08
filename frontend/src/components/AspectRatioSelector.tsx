@@ -23,7 +23,6 @@ export const aspectRatiosConfig: Record<string, { icon: any, label: string }> = 
 export default function AspectRatioSelector({
   value,
   onChange,
-  onClose
 }: AspectRatioSelectorProps) {
   
   const handleClick = (e: React.MouseEvent) => {

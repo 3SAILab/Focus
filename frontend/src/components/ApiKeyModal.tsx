@@ -1,7 +1,7 @@
 // src/components/ApiKeyModal.tsx
 
-import { useState } from 'react';
-import { Key, X, Loader2, Check } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Key, X, Loader2, Check, Eye, EyeOff } from 'lucide-react';
 import { api } from '../api';
 import { useToast } from '../context/ToastContext';
 
@@ -16,6 +16,19 @@ export default function ApiKeyModal({ isOpen, canClose, onClose, onSuccess }: Ap
   const toast = useToast();
   const [apiKey, setApiKey] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [maskedKey, setMaskedKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      // 获取当前的 masked key
+      api.checkConfig().then(res => res.json()).then(data => {
+        if (data.masked_key) {
+          setMaskedKey(data.masked_key);
+        }
+      }).catch(() => {});
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -69,15 +82,34 @@ export default function ApiKeyModal({ isOpen, canClose, onClose, onSuccess }: Ap
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* 显示当前 Key（如果有） */}
+          {maskedKey && (
+            <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">当前 Key</span>
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="font-mono text-sm text-gray-700 mt-1">
+                {showKey ? maskedKey : '••••••••••••'}
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider">
-              Gemini API Key
+              API Key
             </label>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="AIzaSy..."
+              placeholder={maskedKey ? '输入新的 API Key...' : 'AIzaSy...'}
               className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 focus:border-red-500 focus:ring-2 focus:ring-red-500/20 outline-none transition-all font-mono text-sm"
               autoFocus
             />
@@ -100,10 +132,6 @@ export default function ApiKeyModal({ isOpen, canClose, onClose, onSuccess }: Ap
               </>
             )}
           </button>
-          
-          <p className="text-xs text-gray-400 text-center">
-             您的 Key 将会被安全地存储在本地服务器的 .env 文件中
-          </p>
         </form>
       </div>
     </div>

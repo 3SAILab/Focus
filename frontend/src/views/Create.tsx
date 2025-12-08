@@ -1,14 +1,20 @@
 // src/views/Create.tsx
 
 import { useState, useEffect, useRef } from 'react';
+import { ChevronDown } from 'lucide-react';
 import Lightbox from '../components/Lightbox';
 import ImageCard from '../components/ImageCard';
 import PlaceholderCard from '../components/PlaceholderCard';
 import PromptBar from '../components/PromptBar';
+import GenerationCounter from '../components/GenerationCounter';
+import QuotaErrorAlert from '../components/QuotaErrorAlert';
+import ContactModal from '../components/ContactModal';
 import type { GenerationHistory } from '../type';
+import { GenerationType } from '../type';
 import { api } from '../api';
 import { loadImageAsFile } from '../utils';
 import { useToast } from '../context/ToastContext';
+import { getErrorMessage } from '../utils/errorHandler';
 
 export default function Create() {
   const toast = useToast();
@@ -21,6 +27,10 @@ export default function Create() {
   const [selectedPrompt, setSelectedPrompt] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [triggerGenerate, setTriggerGenerate] = useState(false);
+  const [counterRefresh, setCounterRefresh] = useState(0);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showQuotaError, setShowQuotaError] = useState(false);
+  const [showContact, setShowContact] = useState(false);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -94,8 +104,12 @@ export default function Create() {
     try {
       const response = await api.getHistory();
       if (response.ok) {
-        const data = await response.json();
-        setHistory(data);
+        const data: GenerationHistory[] = await response.json();
+        // 过滤掉白底图和换装的历史记录，只显示创作空间的
+        const filteredData = data.filter(
+          (item) => !item.type || item.type === GenerationType.CREATE
+        );
+        setHistory(filteredData);
       }
     } catch (error) {
       console.error('加载历史记录失败:', error);
@@ -107,7 +121,10 @@ export default function Create() {
     setGeneratingId(null);
     await loadHistory();
     
-    // [!code ++] 修复点：生成成功后，清空父组件选中的文件，防止下次引用时带入旧图
+    // 刷新生成计数器
+    setCounterRefresh(prev => prev + 1);
+    
+    // 修复点：生成成功后，清空父组件选中的文件，防止下次引用时带入旧图
     setSelectedFiles([]); 
 
     // 强制滚动到底部
@@ -123,8 +140,33 @@ export default function Create() {
   const handleGenerateError = (error: string) => {
     setIsGenerating(false);
     setGeneratingId(null);
-    toast.error('生成失败: ' + error);
+    
+    const { message, isQuotaError } = getErrorMessage(error);
+    if (isQuotaError) {
+      setShowQuotaError(true);
+    } else {
+      toast.error('生成失败: ' + message);
+    }
   };
+
+  // 监听滚动，显示/隐藏回到底部按钮
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      // 距离底部超过 200px 时显示按钮
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      setShowScrollButton(distanceFromBottom > 200);
+    };
+
+    // 初始检查一次
+    handleScroll();
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [history.length]); // 当历史记录变化时重新绑定
 
   // 重新生成：使用历史记录的提示词和参考图
   const handleRegenerate = async (item: GenerationHistory) => {
@@ -193,7 +235,7 @@ export default function Create() {
           <span className="w-2 h-2 rounded-full bg-green-500"></span>
           AI 创意工坊
         </h1>
-        <div className="text-xs text-gray-400">Local Server</div>
+        <GenerationCounter refreshTrigger={counterRefresh} />
       </header>
 
       <div
@@ -227,7 +269,11 @@ export default function Create() {
                 {/* 用户指令气泡 */}
                 <div className="flex justify-end mb-3 px-2">
                     <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm max-w-[80%]">
-                        {item.original_prompt || item.prompt || '无提示词'}
+                        {item.type === GenerationType.WHITE_BACKGROUND
+                          ? '白底图创作'
+                          : item.type === GenerationType.CLOTHING_CHANGE
+                          ? '一键换装'
+                          : item.original_prompt || item.prompt || '无提示词'}
                     </div>
                 </div>
 
@@ -297,7 +343,31 @@ export default function Create() {
         }}
       />
 
+      {/* 回到底部按钮 - 放在右上角，header 下方 */}
+      {showScrollButton && (
+        <button
+          onClick={scrollToBottom}
+          className="fixed top-20 right-6 w-10 h-10 bg-white shadow-lg rounded-full flex items-center justify-center text-gray-500 hover:text-red-600 hover:shadow-xl transition-all z-50 border border-gray-200 hover:scale-105"
+          title="回到底部"
+        >
+          <ChevronDown className="w-5 h-5" />
+        </button>
+      )}
+
       <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
+      
+      {/* 配额耗尽错误弹窗 */}
+      <QuotaErrorAlert
+        isOpen={showQuotaError}
+        onClose={() => setShowQuotaError(false)}
+        onContactSales={() => {
+          setShowQuotaError(false);
+          setShowContact(true);
+        }}
+      />
+      
+      {/* 联系销售弹窗 */}
+      <ContactModal isOpen={showContact} onClose={() => setShowContact(false)} />
     </>
   );
 }

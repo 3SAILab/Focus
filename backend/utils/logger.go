@@ -11,10 +11,10 @@ func RecursivelyMaskBase64(data interface{}) interface{} {
 	case map[string]interface{}:
 		newMap := make(map[string]interface{})
 		for k, val := range v {
-			// 核心逻辑：如果 key 是 data 且值是长字符串，则屏蔽
-			if k == "data" {
+			// 核心逻辑：如果 key 是 data/Data/b64_json 且值是长字符串，则屏蔽
+			if k == "data" || k == "Data" || k == "b64_json" || k == "base64" {
 				if s, ok := val.(string); ok && len(s) > 100 {
-					newMap[k] = fmt.Sprintf("[BASE64_DATA_MASKED_LENGTH_%d]", len(s))
+					newMap[k] = fmt.Sprintf("[BASE64_IMAGE_PLACEHOLDER length=%d]", len(s))
 					continue
 				}
 			}
@@ -50,3 +50,53 @@ func LogJSON(title string, v interface{}) {
 	fmt.Printf("\n====== [%s] ======\n%s\n================================\n", title, string(prettyBytes))
 }
 
+
+
+// LogResponseStructure 打印响应的结构（只显示 key 和类型，不显示值）
+func LogResponseStructure(title string, data interface{}) {
+	structure := getStructure(data, "")
+	fmt.Printf("\n====== [%s] ======\n%s\n================================\n", title, structure)
+}
+
+// getStructure 递归获取数据结构
+func getStructure(data interface{}, prefix string) string {
+	result := ""
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for k, val := range v {
+			currentPath := prefix + "." + k
+			if prefix == "" {
+				currentPath = k
+			}
+			switch innerVal := val.(type) {
+			case map[string]interface{}:
+				result += fmt.Sprintf("%s: object\n", currentPath)
+				result += getStructure(innerVal, currentPath)
+			case []interface{}:
+				result += fmt.Sprintf("%s: array[%d]\n", currentPath, len(innerVal))
+				if len(innerVal) > 0 {
+					result += getStructure(innerVal[0], currentPath+"[0]")
+				}
+			case string:
+				if len(innerVal) > 100 {
+					result += fmt.Sprintf("%s: string (length=%d)\n", currentPath, len(innerVal))
+				} else {
+					result += fmt.Sprintf("%s: string = \"%s\"\n", currentPath, innerVal)
+				}
+			case float64:
+				result += fmt.Sprintf("%s: number = %v\n", currentPath, innerVal)
+			case bool:
+				result += fmt.Sprintf("%s: bool = %v\n", currentPath, innerVal)
+			case nil:
+				result += fmt.Sprintf("%s: null\n", currentPath)
+			default:
+				result += fmt.Sprintf("%s: %T\n", currentPath, innerVal)
+			}
+		}
+	case []interface{}:
+		if len(v) > 0 {
+			result += getStructure(v[0], prefix+"[0]")
+		}
+	}
+	return result
+}
