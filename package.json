@@ -138,12 +138,14 @@
     "email": "support@sigma-ai.com"
   },
   "devDependencies": {
-    "dmg-license": "^1.0.11",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
     "cross-env": "^7.0.3",
     "jest": "^29.7.0",
     "rimraf": "^5.0.5"
+  },
+  "optionalDependencies": {
+    "dmg-license": "^1.0.11"
   }
 }
 
