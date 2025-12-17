@@ -17,6 +17,10 @@ on:
     tags:
       - 'v*'
 
+# 添加工作流权限
+permissions:
+  contents: write
+
 env:
   GO_VERSION: '1.21'
   NODE_VERSION: '20'
@@ -218,12 +222,10 @@ jobs:
           $salesName = "${{ matrix.sales }}"
           $artifactName = "Focus-${version}-${salesName}.exe"
           
-          npx electron-builder --win --x64 --ia32 `
+          npx electron-builder --win --x64 --ia32 --publish never `
             --config.directories.output="release-$salesName" `
             --config.win.artifactName="$artifactName"
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
@@ -307,11 +309,9 @@ jobs:
           # 使用 x64 后端
           cp dist/backend/sigma-backend-x64 dist/backend/sigma-backend
           
-          npx electron-builder --mac --x64 \
+          npx electron-builder --mac --x64 --publish never \
             --config.directories.output="release-${SALES_NAME}-mac-x64" \
             --config.mac.artifactName="$ARTIFACT_NAME"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Mac DMG (arm64)
         run: |
@@ -322,11 +322,9 @@ jobs:
           # 使用 arm64 后端
           cp dist/backend/sigma-backend-arm64 dist/backend/sigma-backend
           
-          npx electron-builder --mac --arm64 \
+          npx electron-builder --mac --arm64 --publish never \
             --config.directories.output="release-${SALES_NAME}-mac-arm64" \
             --config.mac.artifactName="$ARTIFACT_NAME"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Mac installers
         uses: actions/upload-artifact@v4
