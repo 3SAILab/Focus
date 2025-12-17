@@ -40,10 +40,10 @@ jobs:
           if [ -n "${{ github.event.inputs.sales_list }}" ]; then
             # 使用手动输入的销售列表
             SALES="${{ github.event.inputs.sales_list }}"
-            SALES_ARRAY=$(echo $SALES | tr ',' '\n' | jq -R . | jq -s .)
+            SALES_ARRAY=$(echo $SALES | tr ',' '\n' | jq -R . | jq -sc .)
           else
             # 自动扫描 frontend/public 中的 *_wxchat.jpg 文件
-            SALES_ARRAY=$(ls frontend/public/*_wxchat.jpg 2>/dev/null | xargs -I {} basename {} | sed 's/_wxchat\.jpg//' | jq -R . | jq -s .)
+            SALES_ARRAY=$(ls frontend/public/*_wxchat.jpg 2>/dev/null | xargs -I {} basename {} | sed 's/_wxchat\.jpg//' | jq -R . | jq -sc .)
           fi
           echo "matrix=$SALES_ARRAY" >> $GITHUB_OUTPUT
           echo "Found sales: $SALES_ARRAY"
