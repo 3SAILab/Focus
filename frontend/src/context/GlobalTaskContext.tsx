@@ -44,6 +44,16 @@ interface GlobalTaskContextType {
    * Clear completed task from cache
    */
   clearCompletedTask: (taskId: string) => void;
+  
+  /**
+   * Get failed task result (if any)
+   */
+  getFailedTask: (taskId: string) => GenerationTask | undefined;
+  
+  /**
+   * Clear failed task from cache
+   */
+  clearFailedTask: (taskId: string) => void;
 }
 
 const GlobalTaskContext = createContext<GlobalTaskContextType | undefined>(undefined);
@@ -58,6 +68,7 @@ export function GlobalTaskProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
   const tasksRef = useRef<Map<string, TaskInfo>>(new Map());
   const completedTasksRef = useRef<Map<string, GenerationTask>>(new Map());
+  const failedTasksRef = useRef<Map<string, GenerationTask>>(new Map());
   const toastRef = useRef(toast);
   
   // Keep toast ref updated
@@ -87,25 +98,33 @@ export function GlobalTaskProvider({ children }: { children: ReactNode }) {
       console.log(`[GlobalTask] Task ${taskId} status: ${task.status}, type: ${task.type}`);
       
       if (task.status === 'completed') {
+        console.log(`[GlobalTask] Task ${taskId} completed! Storing to completedTasksRef...`);
+        
+        // Store completed task FIRST before stopping polling
+        completedTasksRef.current.set(taskId, task);
+        console.log(`[GlobalTask] completedTasksRef now has ${completedTasksRef.current.size} tasks, includes ${taskId}: ${completedTasksRef.current.has(taskId)}`);
+        
         // Stop polling
         if (taskInfo.intervalId) {
           clearInterval(taskInfo.intervalId);
         }
         tasksRef.current.delete(taskId);
         
-        // Store completed task for later retrieval
-        completedTasksRef.current.set(taskId, task);
-        
         // Show global toast notification
         const typeName = TYPE_NAMES[task.type] || '图片';
-        console.log(`[GlobalTask] Task completed! Showing success toast for ${typeName}, toastRef exists: ${!!toastRef.current}`);
+        console.log(`[GlobalTask] Task completed! Showing success toast for ${typeName}`);
         
         // Use setTimeout to ensure toast is shown after any pending state updates
         setTimeout(() => {
-          console.log(`[GlobalTask] Calling toast.success for ${typeName}`);
           toastRef.current.success(`${typeName}生成完成！`);
         }, 0);
       } else if (task.status === 'failed') {
+        console.log(`[GlobalTask] Task ${taskId} failed! Storing to failedTasksRef...`);
+        
+        // Store failed task FIRST before stopping polling
+        failedTasksRef.current.set(taskId, task);
+        console.log(`[GlobalTask] failedTasksRef now has ${failedTasksRef.current.size} tasks, includes ${taskId}: ${failedTasksRef.current.has(taskId)}`);
+        
         // Stop polling
         if (taskInfo.intervalId) {
           clearInterval(taskInfo.intervalId);
@@ -114,13 +133,9 @@ export function GlobalTaskProvider({ children }: { children: ReactNode }) {
         
         // Show error toast
         const typeName = TYPE_NAMES[task.type] || '图片';
-        console.log(`[GlobalTask] Task failed! Showing error toast for ${typeName}`);
+        console.log(`[GlobalTask] Task failed! Storing failed task for ${typeName}`);
         
-        // Use setTimeout to ensure toast is shown after any pending state updates
-        setTimeout(() => {
-          console.log(`[GlobalTask] Calling toast.error for ${typeName}`);
-          toastRef.current.error(`${typeName}生成失败: ${task.error_msg || '未知错误'}`);
-        }, 0);
+        // Note: Don't show toast here, let the page handle it with ErrorCard
       }
       // If still processing, continue polling
     } catch (error) {
@@ -200,6 +215,20 @@ export function GlobalTaskProvider({ children }: { children: ReactNode }) {
     completedTasksRef.current.delete(taskId);
   }, []);
   
+  /**
+   * Get failed task result
+   */
+  const getFailedTask = useCallback((taskId: string) => {
+    return failedTasksRef.current.get(taskId);
+  }, []);
+  
+  /**
+   * Clear failed task from cache
+   */
+  const clearFailedTask = useCallback((taskId: string) => {
+    failedTasksRef.current.delete(taskId);
+  }, []);
+  
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -220,6 +249,8 @@ export function GlobalTaskProvider({ children }: { children: ReactNode }) {
       isTaskPolling,
       getCompletedTask,
       clearCompletedTask,
+      getFailedTask,
+      clearFailedTask,
     }}>
       {children}
     </GlobalTaskContext.Provider>

@@ -154,6 +154,18 @@ font-family: system-ui, -apple-system, BlinkMacSystemFont,
                    cursor-not-allowed" disabled>
   禁用
 </button>
+
+// 加载状态（任务运行中）
+<button className="px-4 py-2 bg-red-600 text-white rounded-lg 
+                   opacity-50 cursor-not-allowed" disabled>
+  <Loader2 className="w-4 h-4 animate-spin" />
+</button>
+
+// 重新生成按钮禁用状态
+<button className="p-1.5 text-gray-300 cursor-not-allowed rounded-lg" 
+        disabled title="请等待当前任务完成">
+  <RotateCw className="w-3.5 h-3.5" />
+</button>
 ```
 
 ### 输入框

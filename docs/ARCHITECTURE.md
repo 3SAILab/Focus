@@ -165,6 +165,30 @@ flowchart LR
     C -->|否| G[正常显示]
 ```
 
+### 任务状态管理
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle: 初始状态
+    Idle --> Generating: 发送生成请求
+    Generating --> TaskCreated: 后端返回 task_id
+    TaskCreated --> Polling: GlobalTaskContext 轮询
+    Polling --> Completed: 任务完成
+    Polling --> Failed: 任务失败
+    Completed --> Idle: 清理状态
+    Failed --> Idle: 显示 ErrorCard
+    
+    note right of Generating
+        发送按钮显示加载状态
+        输入框可编辑
+    end note
+    
+    note right of Polling
+        重新生成按钮禁用
+        显示占位卡片
+    end note
+```
+
 ## 安全设计
 
 ### TLS 加密

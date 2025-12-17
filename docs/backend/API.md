@@ -131,7 +131,13 @@ POST /generate
 
 支持值：`智能`, `21:9`, `16:9`, `3:2`, `4:3`, `1:1`, `3:4`, `2:3`, `9:16`
 
-**响应示例（成功）：**
+**请求参数（新增）：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `count` | int | 否 | 生成数量，1-4，默认 1 |
+
+**响应示例（单图成功）：**
 
 ```json
 {
@@ -142,6 +148,36 @@ POST /generate
   "ref_images": [
     "https://localhost:8080/uploads/ref_1234567890_image.png"
   ]
+}
+```
+
+**响应示例（多图成功）：**
+
+```json
+{
+  "status": "success",
+  "batch_id": "batch_1234567890",
+  "prompt": "一只可爱的猫咪",
+  "images": [
+    {
+      "image_url": "https://localhost:8080/images/gen_1234567890_0.png",
+      "index": 0
+    },
+    {
+      "image_url": "https://localhost:8080/images/gen_1234567890_1.png",
+      "index": 1
+    }
+  ]
+}
+```
+
+**响应示例（异步模式）：**
+
+当生成时间较长时，后端返回 task_id，前端需要轮询任务状态：
+
+```json
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -350,11 +386,34 @@ GET /tasks/:id
   "ref_images": "[]",
   "image_url": "",
   "error_msg": "API 配额已用尽",
+  "image_count": 1,
   "started_at": "2025-01-01T12:00:00Z",
   "created_at": "2025-01-01T12:00:00Z",
   "updated_at": "2025-01-01T12:01:00Z"
 }
 ```
+
+**任务状态说明：**
+
+| 状态 | 说明 |
+|------|------|
+| `processing` | 正在处理 |
+| `completed` | 处理完成 |
+| `failed` | 处理失败 |
+
+**任务字段说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `task_id` | string | 任务唯一标识 (UUID) |
+| `status` | string | 任务状态 |
+| `type` | string | 生成类型 |
+| `prompt` | string | 提示词 |
+| `image_url` | string | 生成的图片 URL（完成时） |
+| `error_msg` | string | 错误信息（失败时） |
+| `image_count` | int | 请求的图片数量 |
+| `batch_id` | string | 批次 ID（多图生成时） |
+| `batch_index` | int | 批次内索引（多图生成时） |
 
 ---
 

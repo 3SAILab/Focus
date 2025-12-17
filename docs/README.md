@@ -2,6 +2,18 @@
 
 Focus 是一款基于 AI 的图片生成桌面应用，支持多种电商场景的图片处理，包括创意生成、白底图、换装、商品图和光影融合等功能。
 
+**当前版本**: 1.0.2
+
+## 主要功能
+
+- **AI 创意工坊**: 文本生成图片、图生图、多图批量生成
+- **白底图生成**: 一键去除背景，生成电商白底图
+- **一键换装**: AI 智能换装功能
+- **商品图生成**: 产品场景图生成
+- **光影融合**: 产品光影效果处理
+- **任务恢复**: 页面刷新后自动恢复进行中的任务
+- **历史记录**: 完整的生成历史管理
+
 ## 技术栈
 
 | 层级 | 技术 | 版本 |
@@ -13,6 +25,7 @@ Focus 是一款基于 AI 的图片生成桌面应用，支持多种电商场景�
 | **后端** | Go + Gin | 1.25 / 1.11 |
 | **数据库** | SQLite + GORM | - |
 | **打包** | electron-builder | 25.x |
+| **AI 模型** | Google Gemini | gemini-3-pro-image-preview |
 
 ## 项目结构
 
@@ -27,8 +40,8 @@ focus/
 │   │   ├── api/             # API 客户端
 │   │   ├── components/      # React 组件
 │   │   │   └── common/      # 公共组件
-│   │   ├── context/         # React Context
-│   │   ├── hooks/           # 自定义 Hooks
+│   │   ├── context/         # React Context（含 GlobalTaskContext）
+│   │   ├── hooks/           # 自定义 Hooks（含 useTaskRecovery）
 │   │   ├── layout/          # 布局组件
 │   │   ├── router/          # 路由配置
 │   │   ├── type/            # 类型定义
@@ -38,17 +51,19 @@ focus/
 ├── backend/                  # Go 后端
 │   ├── main.go              # 服务入口
 │   ├── handlers/            # HTTP 处理器
-│   ├── models/              # 数据模型
+│   ├── models/              # 数据模型（含异步任务模型）
 │   ├── config/              # 配置管理
 │   ├── server/              # TLS 服务器
 │   └── utils/               # 工具函数
 ├── assets/                   # 应用图标
 ├── build/                    # 构建配置
+├── scripts/                  # 构建脚本
 ├── docs/                     # 项目文档
 │   ├── frontend/            # 前端文档
 │   ├── backend/             # 后端文档
 │   ├── electron/            # Electron 文档
 │   └── ui/                  # UI 文档
+├── .github/workflows/        # GitHub Actions 工作流
 └── release*/                 # 打包输出
 ```
 

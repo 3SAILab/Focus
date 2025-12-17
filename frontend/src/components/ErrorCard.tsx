@@ -4,9 +4,10 @@ interface ErrorCardProps {
   errorMessage: string;
   prompt?: string;
   onRetry?: () => void;
+  disabled?: boolean;
 }
 
-export default function ErrorCard({ errorMessage, prompt, onRetry }: ErrorCardProps) {
+export default function ErrorCard({ errorMessage, prompt, onRetry, disabled = false }: ErrorCardProps) {
   return (
     <div className="masonry-card bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
       {/* 错误图标区域 */}
@@ -20,10 +21,16 @@ export default function ErrorCard({ errorMessage, prompt, onRetry }: ErrorCardPr
         {onRetry && (
           <button
             onClick={onRetry}
-            className="mt-4 flex items-center gap-2 px-4 py-2 bg-red-500 text-white text-sm rounded-full hover:bg-red-600 transition-colors"
+            disabled={disabled}
+            className={`mt-4 flex items-center gap-2 px-4 py-2 text-sm rounded-full transition-colors ${
+              disabled 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                : 'bg-red-500 text-white hover:bg-red-600'
+            }`}
+            title={disabled ? '请等待当前任务完成' : '重试'}
           >
             <RotateCw className="w-4 h-4" />
-            重试
+            {disabled ? '请等待...' : '重试'}
           </button>
         )}
       </div>

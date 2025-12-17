@@ -1,4 +1,4 @@
-import { Maximize2, RectangleHorizontal, RectangleVertical, Square } from 'lucide-react';
+import { RectangleHorizontal, RectangleVertical, Square } from 'lucide-react';
 import type { AspectRatio } from '../type';
 
 interface AspectRatioSelectorProps {
@@ -8,8 +8,7 @@ interface AspectRatioSelectorProps {
 }
 
 // 导出配置供外部使用图标
-export const aspectRatiosConfig: Record<string, { icon: any, label: string }> = {
-  '智能': { icon: Maximize2, label: '智能' },
+export const aspectRatiosConfig: Record<string, { icon: any; label: string }> = {
   '1:1': { icon: Square, label: '1:1' },
   '16:9': { icon: RectangleHorizontal, label: '16:9' },
   '9:16': { icon: RectangleVertical, label: '9:16' },

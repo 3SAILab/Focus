@@ -15,6 +15,7 @@ interface ImageCardProps {
   onEditPrompt?: (item: GenerationHistory) => void; // 编辑提示词（不自动发送）
   onUseAsReference?: (url: string) => void;
   hidePrompt?: boolean; // 是否隐藏 prompt 显示
+  disabled?: boolean; // 是否禁用重新生成按钮
 }
 
 // 根据类型获取友好的显示名称
@@ -36,6 +37,7 @@ export default function ImageCard({
   onEditPrompt,
   onUseAsReference,
   hidePrompt = false,
+  disabled = false,
 }: ImageCardProps) {
   const toast = useToast();
   const [isHovered, setIsHovered] = useState(false);
@@ -173,11 +175,16 @@ export default function ImageCard({
               {onRegenerate && (
                 <button
                   onClick={handleRegenerate}
-                  className="text-white text-xs bg-white/20 backdrop-blur px-3 py-1.5 rounded-full hover:bg-white/40 cursor-pointer flex items-center gap-1.5 transition-all"
-                  title="重新生成"
+                  disabled={disabled}
+                  className={`text-white text-xs backdrop-blur px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-all ${
+                    disabled 
+                      ? 'bg-white/10 cursor-not-allowed opacity-50' 
+                      : 'bg-white/20 hover:bg-white/40 cursor-pointer'
+                  }`}
+                  title={disabled ? '请等待当前任务完成' : '重新生成'}
                 >
                   <RotateCw className="w-3 h-3" />
-                  重新生成
+                  {disabled ? '请等待...' : '重新生成'}
                 </button>
               )}
               {onUseAsReference && (

@@ -246,6 +246,71 @@ function MyComponent() {
 
 ---
 
+## useGlobalTask
+
+全局任务管理 Context，用于跨页面的异步任务轮询和状态管理。
+
+### 接口
+
+```typescript
+interface GlobalTaskContextType {
+  registerTask: (taskId: string, type: GenerationTypeValue) => void;  // 注册任务
+  unregisterTask: (taskId: string) => void;  // 取消注册
+  isTaskPolling: (taskId: string) => boolean;  // 检查是否在轮询
+  getCompletedTask: (taskId: string) => GenerationTask | undefined;  // 获取完成的任务
+  clearCompletedTask: (taskId: string) => void;  // 清理完成的任务
+  getFailedTask: (taskId: string) => GenerationTask | undefined;  // 获取失败的任务
+  clearFailedTask: (taskId: string) => void;  // 清理失败的任务
+}
+
+function useGlobalTask(): GlobalTaskContextType
+```
+
+### 功能
+
+- 全局管理异步生成任务
+- 每 2 秒轮询任务状态
+- 任务完成时显示 Toast 通知
+- 支持跨页面导航保持轮询
+- 存储完成/失败的任务供页面获取
+
+### 用法
+
+```tsx
+function CreatePage() {
+  const { registerTask, isTaskPolling, getCompletedTask, clearCompletedTask } = useGlobalTask();
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+
+  // 注册新任务
+  const handleTaskCreated = (taskId: string) => {
+    registerTask(taskId, GenerationType.CREATE);
+    setCurrentTaskId(taskId);
+  };
+
+  // 监听任务完成
+  useEffect(() => {
+    if (!currentTaskId) return;
+    
+    const checkInterval = setInterval(() => {
+      const completedTask = getCompletedTask(currentTaskId);
+      if (completedTask) {
+        clearCompletedTask(currentTaskId);
+        setCurrentTaskId(null);
+        loadHistory();
+      }
+    }, 500);
+    
+    return () => clearInterval(checkInterval);
+  }, [currentTaskId]);
+
+  return (
+    <PromptBar onTaskCreated={handleTaskCreated} />
+  );
+}
+```
+
+---
+
 ## 最佳实践
 
 ### 1. 使用 useCallback 包装回调

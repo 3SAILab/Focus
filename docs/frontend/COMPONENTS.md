@@ -211,33 +211,53 @@ interface QuotaErrorHandlerProps {
 
 ### PromptBar
 
-提示词输入栏组件，包含文本输入、参考图上传和生成按钮。
+提示词输入栏组件，包含文本输入、参考图上传、宽高比选择、生成数量选择和生成按钮。
 
 ```typescript
 interface PromptBarProps {
-  onGenerate: () => void;     // 生成完成回调
-  onGenerateStart: () => void;  // 生成开始回调
-  onError: (error: string) => void;  // 错误回调
+  onGenerate: (response: GenerateResponse) => void;  // 单图生成完成回调
+  onGenerateMulti?: (response: GenerateMultiResponse) => void;  // 多图生成回调
+  onGenerateStart?: (prompt?: string, imageCount?: number) => void;  // 生成开始回调
+  onError: (error: string, prompt?: string, imageCount?: number) => void;  // 错误回调
+  onPreviewImage?: (url: string) => void;   // 预览回调
   initialPrompt?: string;     // 初始提示词
   initialFiles?: File[];      // 初始参考图
   onFilesChange?: (files: File[]) => void;  // 文件变化回调
-  onPreviewImage?: (url: string) => void;   // 预览回调
   triggerGenerate?: boolean;  // 触发生成
   onTriggered?: () => void;   // 触发后回调
+  // SSE 流式回调
+  onSSEStart?: (event: SSEStartEvent) => void;
+  onSSEImage?: (event: SSEImageEvent) => void;
+  onSSEComplete?: (event: SSECompleteEvent) => void;
+  // 禁用状态
+  disabled?: boolean;         // 外部禁用控制
+  isTaskRunning?: boolean;    // 任务运行状态（禁用发送按钮）
+  onTaskCreated?: (taskId: string) => void;  // 异步任务创建回调
+  promptVersion?: number;     // 提示词更新版本号
 }
 ```
+
+**功能特性：**
+- 发送后自动清空输入框，允许用户编辑下一个任务
+- 任务运行时发送按钮显示加载状态
+- 支持拖拽、粘贴图片
+- 支持宽高比选择（1:1, 16:9, 9:16 等）
+- 支持批量生成（1-4张）
 
 **用法：**
 
 ```tsx
 <PromptBar
   onGenerate={handleGenerate}
+  onGenerateMulti={handleGenerateMulti}
   onGenerateStart={handleGenerateStart}
   onError={handleError}
   initialPrompt={selectedPrompt}
   initialFiles={selectedFiles}
   onFilesChange={setSelectedFiles}
   onPreviewImage={setLightboxImage}
+  isTaskRunning={isTaskRunning}
+  onTaskCreated={setCurrentTaskId}
 />
 ```
 
@@ -251,11 +271,19 @@ interface PromptBarProps {
 interface ImageCardProps {
   item: GenerationHistory;    // 历史记录项
   onImageClick: (url: string) => void;  // 图片点击
-  onRefImageClick: (url: string) => void;  // 参考图点击
-  onRegenerate: (item: GenerationHistory) => void;  // 重新生成
-  onUseAsReference: (url: string) => void;  // 作为参考图
+  onRefImageClick?: (url: string) => void;  // 参考图点击
+  onRegenerate?: (item: GenerationHistory) => void;  // 重新生成
+  onEditPrompt?: (item: GenerationHistory) => void;  // 编辑提示词
+  onUseAsReference?: (url: string) => void;  // 作为参考图
+  hidePrompt?: boolean;       // 是否隐藏提示词
+  disabled?: boolean;         // 是否禁用重新生成按钮
 }
 ```
+
+**功能特性：**
+- 支持图片拖拽到 PromptBar 作为参考图
+- 右键菜单支持下载、复制、引用等操作
+- 任务运行时重新生成按钮显示禁用状态
 
 ---
 
@@ -290,6 +318,37 @@ interface LightboxProps {
 
 ```tsx
 {isGenerating && <PlaceholderCard />}
+```
+
+---
+
+### ErrorCard
+
+错误卡片组件，显示生成失败信息和重试按钮。
+
+```typescript
+interface ErrorCardProps {
+  errorMessage: string;       // 错误信息
+  prompt?: string;            // 提示词
+  onRetry?: () => void;       // 重试回调
+  disabled?: boolean;         // 是否禁用重试按钮
+}
+```
+
+**功能特性：**
+- 显示错误图标和错误信息
+- 提供重试按钮
+- 任务运行时重试按钮显示禁用状态
+
+**用法：**
+
+```tsx
+<ErrorCard
+  errorMessage="生成失败，请重试"
+  prompt={failedPrompt}
+  onRetry={handleRetry}
+  disabled={isTaskRunning}
+/>
 ```
 
 ---
@@ -385,11 +444,21 @@ interface AspectRatioSelectorProps {
 创作空间页面，支持文本生成和图生图。
 
 **功能：**
-- 提示词输入
-- 参考图上传
-- 宽高比选择
-- 历史记录展示
-- 任务恢复
+- 提示词输入（支持中英文）
+- 参考图上传（支持拖拽、粘贴）
+- 宽高比选择（1:1, 16:9, 9:16 等）
+- 批量生成（1-4张）
+- 历史记录展示（按批次分组）
+- 任务恢复（页面刷新后自动恢复）
+- 失败重试（ErrorCard 显示）
+- 任务状态管理（运行时禁用重新生成按钮）
+
+**状态管理：**
+- `isTaskRunning`: 统一的任务运行状态
+- `currentTaskId`: 当前异步任务 ID
+- `processingTasks`: 恢复的处理中任务列表
+- `batchResults`: 批量生成结果
+- `failedGenerations`: 失败的生成记录
 
 ---
 

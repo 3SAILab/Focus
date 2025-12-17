@@ -69,7 +69,6 @@ export interface ImageGridItem {
 }
 
 export type AspectRatio = 
-  | '智能' 
   | '21:9' 
   | '16:9' 
   | '3:2' 

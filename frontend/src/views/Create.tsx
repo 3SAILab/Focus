@@ -38,7 +38,7 @@ interface BatchResult {
 
 export default function Create() {
   const toast = useToast();
-  const { isTaskPolling, getCompletedTask, clearCompletedTask } = useGlobalTask();
+  const { isTaskPolling, getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask } = useGlobalTask();
   const [history, setHistory] = useState<GenerationHistory[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -65,6 +65,9 @@ export default function Create() {
   const [streamingBatch, setStreamingBatch] = useState<BatchResult | null>(null);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  
+  // 计算任务运行状态（用于禁用重新生成按钮）
+  // 注意：processingTasks 在 useTaskRecovery 之后才可用，这里先定义为 false，后面会更新
   const bottomRef = useRef<HTMLDivElement>(null);
   const isInitialLoadRef = useRef(true); // 标记是否为首次加载
 
@@ -107,12 +110,39 @@ export default function Create() {
   const handleTaskFailed = useCallback((task: GenerationTask) => {
     console.log('[Create] Task failed:', task.task_id, task.error_msg);
     const { message, isQuotaError } = getErrorMessage(task.error_msg);
+    const taskImageCount = task.image_count || 1;
+    
+    // 添加失败记录到列表，显示 ErrorCard 让用户重试
+    if (taskImageCount > 1) {
+      // 多图生成失败
+      const failedBatch: BatchResult = {
+        batchId: 'failed-task-' + task.task_id,
+        images: Array.from({ length: taskImageCount }, (_, index) => ({
+          error: message,
+          isLoading: false,
+          index,
+        })),
+        prompt: task.prompt || '未知提示词',
+        timestamp: Date.now(),
+        imageCount: taskImageCount,
+      };
+      setBatchResults(prev => [...prev, failedBatch]);
+    } else {
+      // 单图失败：添加失败记录到列表
+      const failedRecord: FailedGeneration = {
+        id: 'failed-task-' + task.task_id,
+        prompt: task.prompt || '未知提示词',
+        errorMessage: message,
+        timestamp: Date.now(),
+      };
+      setFailedGenerations(prev => [...prev, failedRecord]);
+    }
+    
     if (isQuotaError) {
       setShowQuotaError(true);
-    } else {
-      toast.error('生成失败: ' + message);
     }
-  }, [toast]);
+    // 不再显示 toast，改为显示 ErrorCard
+  }, []);
 
   // Use task recovery hook to restore in-progress tasks after page refresh
   // Requirements: 1.4, 1.5, 2.1, 2.2, 2.3, 2.4
@@ -122,38 +152,108 @@ export default function Create() {
     onTaskFailed: handleTaskFailed,
   });
 
+  // 计算任务运行状态（用于禁用重新生成按钮和发送按钮）
+  const isTaskRunning = isGenerating || !!currentTaskId || processingTasks.length > 0 || !!streamingBatch;
+
+  // 处理重新生成时检查任务状态
+  const handleRegenerateWithCheck = useCallback((callback: () => void) => {
+    if (isTaskRunning) {
+      toast.warning('请等待当前任务完成后再操作');
+      return;
+    }
+    callback();
+  }, [isTaskRunning, toast]);
+
   // 监听当前任务完成（通过 GlobalTaskContext 轮询）
   useEffect(() => {
-    if (!currentTaskId) return;
+    if (!currentTaskId) {
+      console.log('[Create] No currentTaskId, skipping task monitoring');
+      return;
+    }
+    
+    console.log('[Create] Starting task monitoring for:', currentTaskId);
     
     const checkInterval = setInterval(() => {
-      // 检查任务是否还在轮询中
-      if (!isTaskPolling(currentTaskId)) {
-        // 任务完成，检查结果
-        const completedTask = getCompletedTask(currentTaskId);
-        if (completedTask) {
-          console.log('[Create] Task completed via GlobalTaskContext:', completedTask.task_id);
-          setIsGenerating(false);
-          setGeneratingId(null);
-          setCurrentTaskId(null);
-          // 重新加载历史记录
-          loadHistory();
-          // 刷新计数器
-          setCounterRefresh(prev => prev + 1);
-          // 清理完成的任务
-          clearCompletedTask(currentTaskId);
+      const polling = isTaskPolling(currentTaskId);
+      const completedTask = getCompletedTask(currentTaskId);
+      const failedTask = getFailedTask(currentTaskId);
+      
+      console.log('[Create] Task check:', {
+        taskId: currentTaskId,
+        isPolling: polling,
+        hasCompleted: !!completedTask,
+        hasFailed: !!failedTask,
+      });
+      
+      // 优先检查是否有完成或失败的任务结果
+      if (completedTask) {
+        console.log('[Create] Task completed via GlobalTaskContext:', completedTask.task_id);
+        // 先清理任务，再更新状态
+        clearCompletedTask(currentTaskId);
+        setIsGenerating(false);
+        setGeneratingId(null);
+        setCurrentTaskId(null);
+        // 重新加载历史记录
+        loadHistory();
+        // 刷新计数器
+        setCounterRefresh(prev => prev + 1);
+        return;
+      }
+      
+      if (failedTask) {
+        console.log('[Create] Task failed via GlobalTaskContext:', failedTask.task_id);
+        // 先清理任务
+        clearFailedTask(currentTaskId);
+        setIsGenerating(false);
+        setGeneratingId(null);
+        setCurrentTaskId(null);
+        
+        // 添加失败记录到列表，显示 ErrorCard
+        const { message, isQuotaError } = getErrorMessage(failedTask.error_msg);
+        const taskImageCount = failedTask.image_count || 1;
+        
+        if (taskImageCount > 1) {
+          const failedBatch: BatchResult = {
+            batchId: 'failed-task-' + failedTask.task_id,
+            images: Array.from({ length: taskImageCount }, (_, index) => ({
+              error: message,
+              isLoading: false,
+              index,
+            })),
+            prompt: failedTask.prompt || currentPrompt || '未知提示词',
+            timestamp: Date.now(),
+            imageCount: taskImageCount,
+          };
+          setBatchResults(prev => [...prev, failedBatch]);
         } else {
-          // 任务完成但没有结果（可能失败了）
-          console.log('[Create] Task finished but no result:', currentTaskId);
-          setIsGenerating(false);
-          setGeneratingId(null);
-          setCurrentTaskId(null);
+          const failedRecord: FailedGeneration = {
+            id: 'failed-task-' + failedTask.task_id,
+            prompt: failedTask.prompt || currentPrompt || '未知提示词',
+            errorMessage: message,
+            timestamp: Date.now(),
+          };
+          setFailedGenerations(prev => [...prev, failedRecord]);
         }
+        
+        if (isQuotaError) {
+          setShowQuotaError(true);
+        }
+        return;
+      }
+      
+      // 如果任务不在轮询中，也没有完成/失败结果，可能是未知状态
+      if (!polling) {
+        console.log('[Create] Task not polling and no result, waiting...', currentTaskId);
+        // 给一点时间让 GlobalTaskContext 处理完成
+        // 不立即重置，等待下一次检查
       }
     }, 500);
     
-    return () => clearInterval(checkInterval);
-  }, [currentTaskId, isTaskPolling, getCompletedTask, clearCompletedTask, loadHistory]);
+    return () => {
+      console.log('[Create] Stopping task monitoring for:', currentTaskId);
+      clearInterval(checkInterval);
+    };
+  }, [currentTaskId, isTaskPolling, getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask, loadHistory, currentPrompt]);
 
   useEffect(() => {
     loadHistory();
@@ -218,6 +318,7 @@ export default function Create() {
   const handleGenerate = async (response: GenerateResponse) => {
     setIsGenerating(false);
     setGeneratingId(null);
+    setCurrentTaskId(null); // 重置任务 ID
     
     // Mock 模式下，将单图结果也添加到 batchResults 中显示
     if (response.image_url) {
@@ -251,6 +352,7 @@ export default function Create() {
   const handleGenerateMulti = async (response: GenerateMultiResponse) => {
     setIsGenerating(false);
     setGeneratingId(null);
+    setCurrentTaskId(null); // 重置任务 ID
     
     // 将多图响应转换为 BatchResult
     const batchResult: BatchResult = {
@@ -293,6 +395,7 @@ export default function Create() {
   const handleGenerateError = (error: string, prompt?: string, imageCount?: number) => {
     setIsGenerating(false);
     setGeneratingId(null);
+    setCurrentTaskId(null); // 重置任务 ID
     
     const { message, isQuotaError } = getErrorMessage(error);
     const count = imageCount || currentImageCount;
@@ -349,6 +452,10 @@ export default function Create() {
 
   // 重新生成：使用历史记录的提示词和参考图
   const handleRegenerate = async (item: GenerationHistory) => {
+    if (isTaskRunning) {
+      toast.warning('请等待当前任务完成后再操作');
+      return;
+    }
     try {
       // 解析参考图
       let refImageUrls: string[] = [];
@@ -446,6 +553,10 @@ export default function Create() {
 
   // 重新生成批次：使用相同的提示词重新生成
   const handleRegenerateBatch = (batch: BatchResult) => {
+    if (isTaskRunning) {
+      toast.warning('请等待当前任务完成后再操作');
+      return;
+    }
     setPromptUpdateKey(prev => prev + 1);
     setSelectedPrompt(batch.prompt);
     setCurrentImageCount(batch.imageCount);
@@ -684,11 +795,12 @@ export default function Create() {
                           <ErrorCard
                             errorMessage={item.error_msg || '未知错误'}
                             prompt={item.prompt}
-                            onRetry={() => {
+                            onRetry={() => handleRegenerateWithCheck(() => {
                               setPromptUpdateKey(prev => prev + 1);
                               setSelectedPrompt(item.prompt);
                               setTimeout(() => setTriggerGenerate(true), 100);
-                            }}
+                            })}
+                            disabled={isTaskRunning}
                           />
                         ) : (
                           <ImageCard
@@ -698,6 +810,7 @@ export default function Create() {
                             onRegenerate={handleRegenerate}
                             onEditPrompt={handleEditPrompt}
                             onUseAsReference={handleUseAsReference}
+                            disabled={isTaskRunning}
                           />
                         )}
                       </div>
@@ -733,14 +846,15 @@ export default function Create() {
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => {
+                            onClick={() => handleRegenerateWithCheck(() => {
                               setPromptUpdateKey(prev => prev + 1);
                               setSelectedPrompt(displayItem.prompt);
                               setCurrentImageCount(batchTotal);
                               setTimeout(() => setTriggerGenerate(true), 100);
-                            }}
-                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                            title="重新生成"
+                            })}
+                            disabled={isTaskRunning}
+                            className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                            title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
                           >
                             <RotateCw className="w-3.5 h-3.5" />
                           </button>
@@ -901,14 +1015,15 @@ export default function Create() {
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => {
+                      onClick={() => handleRegenerateWithCheck(() => {
                         setPromptUpdateKey(prev => prev + 1);
                         // 不删除失败记录，保留占位
                         setSelectedPrompt(failed.prompt);
                         setTimeout(() => setTriggerGenerate(true), 100);
-                      }}
-                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      title="重新生成"
+                      })}
+                      disabled={isTaskRunning}
+                      className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                      title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
                     >
                       <RotateCw className="w-3.5 h-3.5" />
                     </button>
@@ -929,12 +1044,13 @@ export default function Create() {
                     <ErrorCard
                       errorMessage={failed.errorMessage}
                       prompt={failed.prompt}
-                      onRetry={() => {
+                      onRetry={() => handleRegenerateWithCheck(() => {
                         // 不删除失败记录，保留占位
                         setPromptUpdateKey(prev => prev + 1);
                         setSelectedPrompt(failed.prompt);
                         setTimeout(() => setTriggerGenerate(true), 100);
-                      }}
+                      })}
+                      disabled={isTaskRunning}
                     />
                   </div>
                 </div>
@@ -956,8 +1072,9 @@ export default function Create() {
                     </button>
                     <button
                       onClick={() => handleRegenerateBatch(batch)}
-                      className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      title="重新生成"
+                      disabled={isTaskRunning}
+                      className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                      title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
                     >
                       <RotateCw className="w-3.5 h-3.5" />
                     </button>
@@ -1019,8 +1136,8 @@ export default function Create() {
         onSSEStart={handleSSEStart}
         onSSEImage={handleSSEImage}
         onSSEComplete={handleSSEComplete}
-        // 当有正在生成的任务或正在恢复任务时禁用输入
-        disabled={isGenerating || processingTasks.length > 0 || !!streamingBatch}
+        // 异步任务运行状态（禁用发送按钮直到任务完成）
+        isTaskRunning={isTaskRunning}
         // 异步任务创建回调
         onTaskCreated={(taskId) => {
           console.log('[Create] Task created:', taskId);
