@@ -127,7 +127,8 @@
       "window": {
         "width": 540,
         "height": 380
-      }
+      },
+      "writeUpdateInfo": false
     }
   },
   "dependencies": {

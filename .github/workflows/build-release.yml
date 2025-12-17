@@ -239,9 +239,7 @@ jobs:
   # ============================================================================
   package-mac:
     needs: [prepare, build-frontend, build-backend-mac]
-    # 使用 macos-13 (Intel x64) 而不是 macos-latest (ARM64)
-    # 因为 electron-builder 的 hdiutil 在 ARM64 runner 上有兼容性问题
-    runs-on: macos-13
+    runs-on: macos-14
     strategy:
       matrix:
         sales: ${{ fromJson(needs.prepare.outputs.sales_matrix) }}
