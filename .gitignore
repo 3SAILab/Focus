@@ -54,7 +54,8 @@ dist/
 dist-ssr/
 frontend/dist/
 frontend/build/
-build/
+# Note: build/ folder contains installer.nsh and entitlements.mac.plist needed for electron-builder
+# Do NOT ignore the entire build/ folder
 
 # Testing
 coverage/
