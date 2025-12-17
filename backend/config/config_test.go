@@ -72,33 +72,7 @@ func TestInit(t *testing.T) {
 		}
 	})
 	
-	t.Run("TLS配置", func(t *testing.T) {
-		// 测试 TLS 禁用
-		os.Unsetenv("TLS_CERT_PATH")
-		os.Unsetenv("TLS_KEY_PATH")
-		
-		Init()
-		
-		if TLSEnabled {
-			t.Error("期望 TLSEnabled 为 false，当证书路径未设置时")
-		}
-		
-		// 测试 TLS 启用
-		os.Setenv("TLS_CERT_PATH", "/path/to/cert.pem")
-		os.Setenv("TLS_KEY_PATH", "/path/to/key.pem")
-		
-		Init()
-		
-		if !TLSEnabled {
-			t.Error("期望 TLSEnabled 为 true，当证书路径已设置时")
-		}
-		if TLSCertPath != "/path/to/cert.pem" {
-			t.Errorf("期望 TLSCertPath 为 '/path/to/cert.pem'，实际为 '%s'", TLSCertPath)
-		}
-		if TLSKeyPath != "/path/to/key.pem" {
-			t.Errorf("期望 TLSKeyPath 为 '/path/to/key.pem'，实际为 '%s'", TLSKeyPath)
-		}
-	})
+
 }
 
 func TestPathResolution(t *testing.T) {

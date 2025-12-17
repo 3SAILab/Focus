@@ -71,7 +71,7 @@ export default function ApiKeyModal({ isOpen, canClose, onClose, onSuccess }: Ap
         <p className="text-sm text-gray-500 mt-2 text-center">
           {canClose 
             ? '更换后的 Key 将用于后续的图片生成任务' 
-            : '欢迎使用！请输入你的 Google Gemini API Key 以开始创作'}
+            : '欢迎使用！请输入你的 API Key 以开始创作'}
         </p>
       </div>
 

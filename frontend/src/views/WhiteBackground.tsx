@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { ArrowRight } from 'lucide-react';
 import ImageContextMenu from '../components/ImageContextMenu';
 import ShadowOptionDialog, { buildWhiteBackgroundPrompt } from '../components/ShadowOptionDialog';
-import PlaceholderCard from '../components/PlaceholderCard';
 import Lightbox from '../components/Lightbox';
 import {
   PageHeader,
@@ -14,11 +13,11 @@ import {
 import { useImageUpload } from '../hooks/useImageUpload';
 import type { GenerationHistory, GenerationTask } from '../type';
 import { GenerationType } from '../type';
-import { api } from '../api';
 import { useToast } from '../context/ToastContext';
 import { getImageAspectRatio } from '../utils/aspectRatio';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useTaskRecovery } from '../hooks/useTaskRecovery';
+import { useAsyncGeneration } from '../hooks/useAsyncGeneration';
 
 export default function WhiteBackground() {
   const toast = useToast();
@@ -28,7 +27,6 @@ export default function WhiteBackground() {
   
   // State
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [showShadowDialog, setShowShadowDialog] = useState(false);
   const [history, setHistory] = useState<GenerationHistory[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -39,6 +37,7 @@ export default function WhiteBackground() {
 
   const loadHistory = useCallback(async () => {
     try {
+      const { api } = await import('../api');
       const response = await api.getWhiteBackgroundHistory();
       if (response.ok) {
         const data = await response.json();
@@ -49,7 +48,8 @@ export default function WhiteBackground() {
     }
   }, []);
 
-  // Task recovery callbacks - Requirements: 1.4, 1.5, 2.1
+  // Task completion callback - used by both async generation and task recovery
+  // Note: Toast is shown by GlobalTaskContext, this only updates local state
   const handleTaskComplete = useCallback((task: GenerationTask) => {
     console.log('[WhiteBackground] Task completed:', task.task_id);
     // Update generated image with the completed task's result
@@ -60,21 +60,32 @@ export default function WhiteBackground() {
     loadHistory();
     // Refresh generation counter
     setCounterRefresh(prev => prev + 1);
-    toast.success('白底图生成完成！');
-  }, [loadHistory, toast]);
+  }, [loadHistory]);
 
-  const handleTaskFailed = useCallback((task: GenerationTask) => {
-    console.log('[WhiteBackground] Task failed:', task.task_id, task.error_msg);
-    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+  // Error callback - used by both async generation and task recovery
+  const handleError = useCallback((errorMsg: string, isQuotaError: boolean) => {
+    console.log('[WhiteBackground] Error:', errorMsg, 'isQuotaError:', isQuotaError);
     if (isQuotaError) {
       setShowQuotaError(true);
     } else {
+      const { message } = getErrorMessage(errorMsg);
       toast.error('生成失败: ' + message);
     }
   }, [toast]);
 
-  // Use task recovery hook to restore in-progress tasks after page refresh
-  // Requirements: 1.4, 1.5, 2.1, 2.2, 2.3, 2.4
+  const handleTaskFailed = useCallback((task: GenerationTask) => {
+    console.log('[WhiteBackground] Task failed:', task.task_id, task.error_msg);
+    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+    handleError(message, isQuotaError);
+  }, [handleError]);
+
+  // Async generation hook - for new generations
+  const { isGenerating, startGeneration } = useAsyncGeneration({
+    onComplete: handleTaskComplete,
+    onError: handleError,
+  });
+
+  // Task recovery hook - for restoring in-progress tasks after page refresh
   const { processingTasks, isRecovering } = useTaskRecovery({
     type: GenerationType.WHITE_BACKGROUND,
     onTaskComplete: handleTaskComplete,
@@ -126,7 +137,6 @@ export default function WhiteBackground() {
   const handleGenerate = async (removeShadow: boolean) => {
     if (!uploadedFile) return;
 
-    setIsGenerating(true);
     const prompt = buildWhiteBackgroundPrompt(removeShadow);
 
     try {
@@ -140,38 +150,11 @@ export default function WhiteBackground() {
       formData.append('type', GenerationType.WHITE_BACKGROUND);
       formData.append('images', uploadedFile);
 
-      const response = await api.generate(formData);
-
-      if (!response.ok) {
-        const errData = await response.json();
-        // 使用统一的错误处理，根据状态码显示不同提示
-        const { message: errorMsg, isQuotaError } = getErrorMessage(errData, response.status);
-        if (isQuotaError) {
-          setShowQuotaError(true);
-          return;
-        }
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      
-      if (data.image_url) {
-        setGeneratedImage(data.image_url);
-        setCounterRefresh(prev => prev + 1);
-        await loadHistory();
-        toast.success('白底图生成成功！');
-      } else {
-        throw new Error('未返回图片');
-      }
+      // 使用异步生成 - 不阻塞等待结果
+      await startGeneration(formData);
     } catch (error) {
       const { message, isQuotaError } = getErrorMessage(error);
-      if (isQuotaError) {
-        setShowQuotaError(true);
-      } else {
-        toast.error(message);
-      }
-    } finally {
-      setIsGenerating(false);
+      handleError(message, isQuotaError);
     }
   };
 
@@ -234,13 +217,13 @@ export default function WhiteBackground() {
                   <div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                   <p className="text-sm text-gray-500">正在恢复任务状态...</p>
                 </div>
-              ) : isGenerating || processingTasks.length > 0 ? (
-                /* Show loading state for generating or recovered processing tasks - Requirement 2.1 */
+              ) : isGenerating ? (
+                /* 当页点击生成时，动画显示在这里 */
                 <div className="aspect-square flex flex-col items-center justify-center">
-                  <PlaceholderCard />
-                  {processingTasks.length > 0 && (
-                    <p className="text-xs text-red-500 mt-2">正在生成中...</p>
-                  )}
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-50 to-orange-50 flex items-center justify-center mb-4 animate-pulse">
+                    <div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                  <p className="text-sm text-gray-500">正在生成白底图...</p>
                 </div>
               ) : generatedImage ? (
                 <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
@@ -268,13 +251,14 @@ export default function WhiteBackground() {
             </div>
           </div>
 
-          {/* History section */}
+          {/* History section - 只有恢复的任务才显示在这里 */}
           <HistorySection
             title="白底图历史记录"
             history={history}
             onImageClick={handleHistoryClick}
             onImagePreview={setLightboxImage}
             emptyText="暂无白底图生成记录"
+            processingTasks={processingTasks}
           />
         </div>
       </div>

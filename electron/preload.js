@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 获取所有路径配置
   getPaths: () => ipcRenderer.invoke('get-paths'),
   
+  // 保存图片到用户选择的位置
+  saveImage: (imageData, defaultFileName) => ipcRenderer.invoke('save-image', { imageData, defaultFileName }),
+  
   // 监听后端就绪事件
   onBackendReady: (callback) => {
     const listener = () => callback();

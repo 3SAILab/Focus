@@ -9,7 +9,8 @@
  * @returns 构建好的 prompt 字符串
  */
 export function buildProductScenePrompt(productName: string, scene: string): string {
-  return `请你给图中${productName}，生成${scene}的使用场景图，需要符合透视逻辑和使用方法`;
+  return `请你给图中${productName}，生成在${scene}的使用场景图，需要符合透视逻辑和使用方法，
+  保证产品${productName}的一致性，不要发生产品细节偏移和变化`;
 }
 
 /**
@@ -20,5 +21,5 @@ export function buildProductScenePrompt(productName: string, scene: string): str
  * @returns 构建好的 prompt 字符串
  */
 export function buildLightShadowPrompt(productName: string): string {
-  return `不要改变画面中其余内容，增加${productName}的光影真实性`;
+  return `不要改变画面中其余内容，增加${productName}的光影真实性和场景保持一致`;
 }

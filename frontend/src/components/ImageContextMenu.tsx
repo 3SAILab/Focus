@@ -112,20 +112,41 @@ export default function ImageContextMenu({
   // 下载图片
   const handleDownload = async () => {
     try {
-      const response = await fetch(imageUrl);
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `image_${Date.now()}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success('图片下载成功');
+      const defaultFileName = `image_${Date.now()}.png`;
+      
+      // 检查是否在 Electron 环境中
+      if (window.electronAPI?.saveImage) {
+        // 使用 Electron 的保存对话框
+        const result = await window.electronAPI.saveImage(imageUrl, defaultFileName);
+        
+        if (result.canceled) {
+          // 用户取消了保存，不显示任何提示
+          onClose();
+          return;
+        }
+        
+        if (result.success) {
+          toast.success('图片保存成功');
+        } else {
+          toast.error(result.error || '保存失败，请稍后重试');
+        }
+      } else {
+        // 浏览器环境，使用传统下载方式
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = defaultFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast.success('图片保存成功');
+      }
     } catch (error) {
       console.error('下载图片失败:', error);
-      toast.error('下载失败，请稍后重试');
+      toast.error('保存失败，请稍后重试');
     }
     onClose();
   };

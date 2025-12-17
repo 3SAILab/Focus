@@ -70,26 +70,46 @@ export function formatDate(dateString: string): string {
 
 /**
  * 下载图片
+ * @returns Promise<boolean> 返回 true 表示保存成功，false 表示用户取消
  */
-export async function downloadImage(url: string): Promise<void> {
+export async function downloadImage(url: string): Promise<boolean> {
   try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    const blobUrl = window.URL.createObjectURL(blob);
+    const fileName = url.split('/').pop() || `image_${Date.now()}.png`;
     
-    const fileName = url.split('/').pop() || 'ai_image.png';
-    
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    window.URL.revokeObjectURL(blobUrl);
+    // 检查是否在 Electron 环境中
+    if (window.electronAPI?.saveImage) {
+      // 使用 Electron 的保存对话框
+      const result = await window.electronAPI.saveImage(url, fileName);
+      
+      if (result.canceled) {
+        // 用户取消了保存
+        return false;
+      }
+      
+      if (!result.success) {
+        throw new Error(result.error || '保存失败');
+      }
+      
+      return true;
+    } else {
+      // 浏览器环境，使用传统下载方式
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      window.URL.revokeObjectURL(blobUrl);
+      return true;
+    }
   } catch (error) {
     console.error('下载失败:', error);
-    throw new Error('下载失败，请稍后重试');
+    throw new Error('保存失败，请稍后重试');
   }
 }
 

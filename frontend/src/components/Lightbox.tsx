@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import ImageContextMenu from './ImageContextMenu';
 
 interface LightboxProps {
   imageUrl: string | null;
@@ -11,6 +12,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -18,6 +20,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
     if (imageUrl) {
       setZoom(1);
       setPosition({ x: 0, y: 0 });
+      setContextMenuPosition(null);
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
@@ -77,12 +80,30 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
     setIsDragging(false);
   };
 
+  // 右键菜单处理
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
+  };
+
+  // 关闭右键菜单
+  const closeContextMenu = () => {
+    setContextMenuPosition(null);
+  };
+
+  // 点击背景关闭 lightbox 和菜单
+  const handleBackgroundClick = () => {
+    closeContextMenu();
+    onClose();
+  };
+
   if (!imageUrl) return null;
 
   return (
     <div
       className="lightbox active"
-      onClick={onClose}
+      onClick={handleBackgroundClick}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
@@ -90,6 +111,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
         className="lightbox-close"
         onClick={(e) => {
           e.stopPropagation();
+          closeContextMenu();
           onClose();
         }}
       >
@@ -107,6 +129,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
           draggable={false}
           onMouseDown={handleMouseDown}
           onClick={(e) => e.stopPropagation()}
+          onContextMenu={handleContextMenu}
           className="transition-transform duration-75 ease-out max-w-[90vw] max-h-[90vh] object-contain"
           style={{
             transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})`,
@@ -114,6 +137,14 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
           }}
         />
       </div>
+
+      {/* 右键菜单 */}
+      <ImageContextMenu
+        imageUrl={imageUrl}
+        position={contextMenuPosition}
+        imageRect={imgRef.current?.getBoundingClientRect()}
+        onClose={closeContextMenu}
+      />
     </div>
   );
 }

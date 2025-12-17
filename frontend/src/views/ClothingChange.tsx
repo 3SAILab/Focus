@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ArrowRight, User, Shirt, Info } from 'lucide-react';
-import PlaceholderCard from '../components/PlaceholderCard';
 import Lightbox from '../components/Lightbox';
 import ImageContextMenu from '../components/ImageContextMenu';
 import {
@@ -18,12 +17,13 @@ import { useToast } from '../context/ToastContext';
 import { getImageAspectRatio } from '../utils/aspectRatio';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useTaskRecovery } from '../hooks/useTaskRecovery';
+import { useAsyncGeneration } from '../hooks/useAsyncGeneration';
 
 // 默认提示词
 const DEFAULT_PROMPT = '请你不要修改图一模特的姿势保持模特不变，将图一角色的衣服替换成图二的，需要符合图二衣服的上身逻辑';
 
 // 本地存储 key
-const SAVED_MODELS_KEY = 'sigma_saved_models';
+const SAVED_MODELS_KEY = 'sigma_saved_models'; 
 
 interface SavedModel {
   id: string;
@@ -40,7 +40,6 @@ export default function ClothingChange() {
   
   // State
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [counterRefresh, setCounterRefresh] = useState(0);
   const [savedModels, setSavedModels] = useState<SavedModel[]>([]);
@@ -63,32 +62,41 @@ export default function ClothingChange() {
     }
   }, []);
 
-  // Task recovery callbacks - Requirements: 1.4, 1.5, 2.1
+  // Task completion callback
+  // Note: Toast is shown by GlobalTaskContext, this only updates local state
   const handleTaskComplete = useCallback((task: GenerationTask) => {
     console.log('[ClothingChange] Task completed:', task.task_id);
-    // Update generated image with the completed task's result
     if (task.image_url) {
       setGeneratedImage(task.image_url);
     }
-    // Reload history to show the completed task
     loadHistory();
-    // Refresh generation counter
     setCounterRefresh(prev => prev + 1);
-    toast.success('换装生成完成！');
-  }, [loadHistory, toast]);
+  }, [loadHistory]);
 
-  const handleTaskFailed = useCallback((task: GenerationTask) => {
-    console.log('[ClothingChange] Task failed:', task.task_id, task.error_msg);
-    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+  // Error callback
+  const handleError = useCallback((errorMsg: string, isQuotaError: boolean) => {
+    console.log('[ClothingChange] Error:', errorMsg, 'isQuotaError:', isQuotaError);
     if (isQuotaError) {
       setShowQuotaError(true);
     } else {
+      const { message } = getErrorMessage(errorMsg);
       toast.error('生成失败: ' + message);
     }
   }, [toast]);
 
-  // Use task recovery hook to restore in-progress tasks after page refresh
-  // Requirements: 1.4, 1.5, 2.1, 2.2, 2.3, 2.4
+  const handleTaskFailed = useCallback((task: GenerationTask) => {
+    console.log('[ClothingChange] Task failed:', task.task_id, task.error_msg);
+    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+    handleError(message, isQuotaError);
+  }, [handleError]);
+
+  // Async generation hook
+  const { isGenerating, startGeneration } = useAsyncGeneration({
+    onComplete: handleTaskComplete,
+    onError: handleError,
+  });
+
+  // Task recovery hook
   const { processingTasks, isRecovering } = useTaskRecovery({
     type: GenerationType.CLOTHING_CHANGE,
     onTaskComplete: handleTaskComplete,
@@ -193,8 +201,6 @@ export default function ClothingChange() {
       return;
     }
 
-    setIsGenerating(true);
-
     try {
       // Use model image aspect ratio
       let aspectRatio = '1:1';
@@ -233,38 +239,11 @@ export default function ClothingChange() {
       // Add clothing image (second image)
       formData.append('images', clothingUpload.file);
 
-      const response = await api.generate(formData);
-
-      if (!response.ok) {
-        const errData = await response.json();
-        // 使用统一的错误处理，根据状态码显示不同提示
-        const { message: errorMsg, isQuotaError } = getErrorMessage(errData, response.status);
-        if (isQuotaError) {
-          setShowQuotaError(true);
-          return;
-        }
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      
-      if (data.image_url) {
-        setGeneratedImage(data.image_url);
-        setCounterRefresh(prev => prev + 1);
-        await loadHistory();
-        toast.success('换装生成成功！');
-      } else {
-        throw new Error('未返回图片');
-      }
+      // 使用异步生成
+      await startGeneration(formData);
     } catch (error) {
       const { message, isQuotaError } = getErrorMessage(error);
-      if (isQuotaError) {
-        setShowQuotaError(true);
-      } else {
-        toast.error(message);
-      }
-    } finally {
-      setIsGenerating(false);
+      handleError(message, isQuotaError);
     }
   };
 
@@ -422,13 +401,13 @@ export default function ClothingChange() {
                   <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                   <p className="text-sm text-gray-500">正在恢复任务状态...</p>
                 </div>
-              ) : isGenerating || processingTasks.length > 0 ? (
-                /* Show loading state for generating or recovered processing tasks - Requirement 2.1 */
+              ) : isGenerating ? (
+                /* 当页点击生成时，动画显示在这里 */
                 <div className="aspect-[3/4] flex flex-col items-center justify-center">
-                  <PlaceholderCard />
-                  {processingTasks.length > 0 && (
-                    <p className="text-xs text-purple-500 mt-2">正在生成中...</p>
-                  )}
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50 flex items-center justify-center mb-4 animate-pulse">
+                    <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                  <p className="text-sm text-gray-500">正在生成换装效果...</p>
                 </div>
               ) : generatedImage ? (
                 <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-gray-100">
@@ -470,13 +449,14 @@ export default function ClothingChange() {
             />
           </div>
 
-          {/* History section */}
+          {/* History section - 只有恢复的任务才显示在这里 */}
           <HistorySection
             title="换装历史记录"
             history={history}
             onImageClick={handleHistoryClick}
             onImagePreview={setLightboxImage}
             emptyText="暂无换装生成记录"
+            processingTasks={processingTasks}
           />
         </div>
       </div>

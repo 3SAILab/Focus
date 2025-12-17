@@ -39,38 +39,13 @@ const QUOTA_PATTERNS = [
 ];
 
 /**
- * 需要从错误信息中过滤的敏感关键词
- * 这些关键词不应该暴露给用户
- */
-const SENSITIVE_KEYWORDS = [
-  'gemini',
-  'gemini-3',
-  'gemini3',
-  'gemini-pro',
-  'gemini3pro',
-  'gemini-3-pro',
-  'image-preview',
-  'gemini-3-pro-image-preview',
-  'models/',
-];
-
-/**
- * 过滤错误信息中的敏感关键词
- * 如果错误信息包含敏感关键词，返回通用错误提示
+ * 过滤错误信息（后端已处理敏感词，这里做二次保护）
  */
 function filterSensitiveInfo(message: string): string {
-  const lowerMessage = message.toLowerCase();
-  
-  // 检查是否包含敏感关键词
-  const hasSensitiveKeyword = SENSITIVE_KEYWORDS.some(keyword => 
-    lowerMessage.includes(keyword.toLowerCase())
-  );
-  
-  if (hasSensitiveKeyword) {
-    // 返回通用错误提示，不暴露具体模型信息
-    return '服务请求失败，请稍后重试或联系销售获取帮助';
+  // 后端已经过滤了敏感信息，这里只做基本检查
+  if (!message || message.trim() === '') {
+    return '服务请求失败，请稍后重试';
   }
-  
   return message;
 }
 
@@ -84,15 +59,15 @@ export function getErrorByStatusCode(statusCode: number): { message: string; use
     case 401:
       return { message: 'API 密钥验证失败，请联系销售更换卡密', userAction: 'contact_sales' };
     case 403:
-      return { message: '权限不足，请联系销售获取帮助', userAction: 'contact_sales' };
+      return { message: '权限或余额不足，请联系销售获取帮助', userAction: 'contact_sales' };
     case 404:
       return { message: '服务暂时不可用，请联系销售获取帮助', userAction: 'contact_sales' };
     case 413:
       return { message: '发送的图片太多，请减少图片数量后重试', userAction: 'reduce_images' };
     case 429:
-      return { message: '请求过于频繁，请稍后再试', userAction: 'retry_later' };
+      return { message: '429服务器负载异常，不会消耗次数，请重试，多次出现请联系销售获取帮助', userAction: 'retry_later' };
     case 500:
-      return { message: '服务器内部错误，请重试', userAction: 'retry' };
+      return { message: '500服务器负载异常，不会消耗次数，请重试，多次出现请联系销售获取帮助', userAction: 'retry' };
     case 503:
       return { message: '服务暂时不可用，请联系销售获取帮助', userAction: 'contact_sales' };
     default:

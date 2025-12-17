@@ -7,10 +7,17 @@ export interface PathsConfig {
   database: string;
 }
 
+export interface SaveImageResult {
+  success: boolean;
+  canceled?: boolean;
+  filePath?: string;
+  error?: string;
+}
+
 export interface ElectronAPI {
   /**
    * 获取后端服务 URL
-   * @returns Promise<string> 后端服务的完整 URL (例如: https://localhost:8080)
+   * @returns Promise<string> 后端服务的完整 URL (例如: http://localhost:8080)
    */
   getBackendUrl: () => Promise<string>;
   
@@ -31,6 +38,14 @@ export interface ElectronAPI {
    * @returns Promise<PathsConfig> 包含所有路径配置的对象
    */
   getPaths: () => Promise<PathsConfig>;
+  
+  /**
+   * 保存图片到用户选择的位置
+   * @param imageData 图片数据 (data URL, base64, 或远程 URL)
+   * @param defaultFileName 默认文件名
+   * @returns Promise<SaveImageResult> 保存结果
+   */
+  saveImage: (imageData: string, defaultFileName?: string) => Promise<SaveImageResult>;
   
   /**
    * 监听后端就绪事件

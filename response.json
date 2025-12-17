@@ -1,0 +1,11 @@
+{
+    "id": "video_95219059-7640-4767-9015-d98e0ab34e30",
+    "object": "video",
+    "model": "sora-2",
+    "status": "queued",
+    "progress": 0,
+    "created_at": 1765282366,
+    "seconds": "15",
+    "size": "720x1280",
+    "detail": {}
+}

@@ -1,14 +1,127 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
-const TLSManager = require('./tls-manager');
+
+// 创建中文菜单
+function createChineseMenu() {
+  const isMac = process.platform === 'darwin';
+  
+  const template = [
+    // macOS 应用菜单
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { label: '关于 Focus', role: 'about' },
+        { type: 'separator' },
+        { label: '服务', role: 'services' },
+        { type: 'separator' },
+        { label: '隐藏 Focus', role: 'hide' },
+        { label: '隐藏其他', role: 'hideOthers' },
+        { label: '显示全部', role: 'unhide' },
+        { type: 'separator' },
+        { label: '退出 Focus', role: 'quit' }
+      ]
+    }] : []),
+    // 文件菜单
+    {
+      label: '文件',
+      submenu: [
+        isMac ? { label: '关闭窗口', role: 'close' } : { label: '退出', role: 'quit' }
+      ]
+    },
+    // 编辑菜单
+    {
+      label: '编辑',
+      submenu: [
+        { label: '撤销', role: 'undo', accelerator: 'CmdOrCtrl+Z' },
+        { label: '重做', role: 'redo', accelerator: 'Shift+CmdOrCtrl+Z' },
+        { type: 'separator' },
+        { label: '剪切', role: 'cut', accelerator: 'CmdOrCtrl+X' },
+        { label: '复制', role: 'copy', accelerator: 'CmdOrCtrl+C' },
+        { label: '粘贴', role: 'paste', accelerator: 'CmdOrCtrl+V' },
+        ...(isMac ? [
+          { label: '粘贴并匹配样式', role: 'pasteAndMatchStyle' },
+          { label: '删除', role: 'delete' },
+          { label: '全选', role: 'selectAll', accelerator: 'CmdOrCtrl+A' },
+          { type: 'separator' },
+          {
+            label: '语音',
+            submenu: [
+              { label: '开始朗读', role: 'startSpeaking' },
+              { label: '停止朗读', role: 'stopSpeaking' }
+            ]
+          }
+        ] : [
+          { label: '删除', role: 'delete' },
+          { type: 'separator' },
+          { label: '全选', role: 'selectAll', accelerator: 'CmdOrCtrl+A' }
+        ])
+      ]
+    },
+    // 视图菜单
+    {
+      label: '视图',
+      submenu: [
+        { label: '重新加载', role: 'reload', accelerator: 'CmdOrCtrl+R' },
+        { label: '强制重新加载', role: 'forceReload', accelerator: 'CmdOrCtrl+Shift+R' },
+        { type: 'separator' },
+        { label: '实际大小', role: 'resetZoom', accelerator: 'CmdOrCtrl+0' },
+        { label: '放大', role: 'zoomIn', accelerator: 'CmdOrCtrl+Plus' },
+        { label: '缩小', role: 'zoomOut', accelerator: 'CmdOrCtrl+-' },
+        { type: 'separator' },
+        { label: '全屏', role: 'togglefullscreen', accelerator: isMac ? 'Ctrl+Cmd+F' : 'F11' }
+      ]
+    },
+    // 窗口菜单
+    {
+      label: '窗口',
+      submenu: [
+        { label: '最小化', role: 'minimize', accelerator: 'CmdOrCtrl+M' },
+        { label: '缩放', role: 'zoom' },
+        ...(isMac ? [
+          { type: 'separator' },
+          { label: '前置所有窗口', role: 'front' },
+          { type: 'separator' },
+          { label: '窗口', role: 'window' }
+        ] : [
+          { label: '关闭', role: 'close' }
+        ])
+      ]
+    },
+    // 帮助菜单
+    {
+      label: '帮助',
+      submenu: [
+        {
+          label: '关于 Focus',
+          click: async () => {
+            const { dialog } = require('electron');
+            dialog.showMessageBox({
+              type: 'info',
+              title: '关于 Focus',
+              message: 'Focus AI 图像生成工具',
+              detail: `版本: ${app.getVersion()}\n\n© 2025 希革马（宁波市）人工智能有限责任公司\n保留所有权利\n\n本软件最终解释权归希革马（宁波市）人工智能有限责任公司所有\n\n内部测试版`,
+              buttons: ['确定']
+            });
+          }
+        }
+      ]
+    }
+  ];
+
+  return Menu.buildFromTemplate(template);
+}
 
 let mainWindow = null;
 let backendProcess = null;
-let tlsManager = null;
-const BACKEND_PORT = 8080;
-const BACKEND_PROTOCOL = 'https';
+const DEFAULT_BACKEND_PORT = 8080;
+const BACKEND_PROTOCOL = 'http';
+const MAX_PORT_ATTEMPTS = 10;
+const PORT_FILE_NAME = 'sigma-backend.port';
+
+// 实际使用的后端端口（启动后从端口文件读取）
+let actualBackendPort = DEFAULT_BACKEND_PORT;
 
 // Note: isDev and userDataPath will be initialized after app.whenReady()
 // because app.isPackaged and app.getPath() are only available after app is ready
@@ -26,22 +139,19 @@ const originalWarn = console.warn;
 
 // Initialize logging function (will be called after app.whenReady())
 function initializeLogging() {
-  // 生产环境：禁用所有日志输出
-  if (!isDev) {
-    console.log = function() {};
-    console.error = function() {};
-    console.warn = function() {};
-    return;
-  }
+  // 始终启用日志写入文件（用于调试 API 问题）
+  // 但生产环境不输出到控制台
   
-  // 开发环境：保持日志输出并写入文件
   console.log = function(...args) {
     const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
     const timestamp = new Date().toISOString();
     if (logStream) {
       logStream.write(`[${timestamp}] [LOG] ${message}\n`);
     }
-    originalLog.apply(console, args);
+    // 仅开发环境输出到控制台
+    if (isDev) {
+      originalLog.apply(console, args);
+    }
   };
 
   console.error = function(...args) {
@@ -50,7 +160,10 @@ function initializeLogging() {
     if (logStream) {
       logStream.write(`[${timestamp}] [ERROR] ${message}\n`);
     }
-    originalError.apply(console, args);
+    // 仅开发环境输出到控制台
+    if (isDev) {
+      originalError.apply(console, args);
+    }
   };
 
   console.warn = function(...args) {
@@ -59,7 +172,10 @@ function initializeLogging() {
     if (logStream) {
       logStream.write(`[${timestamp}] [WARN] ${message}\n`);
     }
-    originalWarn.apply(console, args);
+    // 仅开发环境输出到控制台
+    if (isDev) {
+      originalWarn.apply(console, args);
+    }
   };
 }
 
@@ -147,26 +263,6 @@ async function startBackend() {
     const directories = ensureDirectories(userDataPath);
     console.log('[Backend] Directory check complete');
     
-    // Initialize TLS certificates
-    console.log('[TLS] Initializing TLS certificate manager...');
-    console.log('[TLS] userDataPath:', userDataPath);
-    try {
-      tlsManager = new TLSManager(userDataPath);
-      console.log('[TLS] TLSManager instance created');
-      const { certPath, keyPath } = await tlsManager.initialize();
-      console.log('[TLS] TLS certificates ready');
-      console.log('[TLS] Certificate path:', certPath);
-      console.log('[TLS] Key path:', keyPath);
-      
-      // Verify certificate files exist
-      if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
-        throw new Error('TLS certificate files generation failed or do not exist');
-      }
-    } catch (tlsError) {
-      console.error('[TLS] TLS certificate initialization failed:', tlsError);
-      throw new Error(`TLS certificate initialization failed: ${tlsError.message}`);
-    }
-    
     // Get and validate backend path
     const backendExe = getBackendPath();
     const backendWorkingDir = path.dirname(backendExe);
@@ -202,33 +298,35 @@ async function startBackend() {
       }
     }
     
-    // Set environment variables
-    const { certPath, keyPath } = tlsManager.getCertificatePaths();
+    // Set environment variables (不再需要 TLS 相关配置)
     const env = {
       ...process.env,
-      API_KEY: process.env.API_KEY || '',
+      // 明确不传递配置相关的环境变量，让后端从 config.json 加载
+      API_KEY: '',
+      DISCLAIMER_AGREED: '',
       OUTPUT_DIR: directories.output,
       UPLOAD_DIR: directories.uploads,
       DB_PATH: path.join(directories.db, 'history.db'),
-      PORT: BACKEND_PORT.toString(),
-      TLS_CERT_PATH: certPath,
-      TLS_KEY_PATH: keyPath,
-      USE_TLS: 'true',
-      LOG_DIR: directories.logs
+      PORT: DEFAULT_BACKEND_PORT.toString(),
+      LOG_DIR: directories.logs,
+      // 启用自动端口发现
+      AUTO_PORT_DISCOVERY: 'true',
+      // 生产环境标识（打包后的应用使用生产模型）
+      PRODUCTION: isDev ? 'false' : 'true'
     };
 
     console.log('[Backend] Starting backend service...');
     console.log('[Backend] Configuration:');
-    console.log('  - Port:', BACKEND_PORT);
+    console.log('  - Default Port:', DEFAULT_BACKEND_PORT);
+    console.log('  - Auto Port Discovery: enabled (max attempts:', MAX_PORT_ATTEMPTS, ')');
     console.log('  - Protocol:', BACKEND_PROTOCOL);
     console.log('  - User data directory:', userDataPath);
     console.log('  - Output directory:', directories.output);
     console.log('  - Upload directory:', directories.uploads);
     console.log('  - Database directory:', directories.db);
-    console.log('  - TLS certificate:', certPath);
-    console.log('  - TLS key:', keyPath);
     console.log('  - Backend executable:', backendExe);
     console.log('  - Working directory:', backendWorkingDir);
+    console.log('  - Port file:', getPortFilePath());
 
     // Spawn backend process
     const spawnOptions = {
@@ -330,38 +428,76 @@ async function startBackend() {
   }
 }
 
+// 获取端口文件路径
+function getPortFilePath() {
+  const os = require('os');
+  const tempDir = os.tmpdir();
+  return path.join(tempDir, PORT_FILE_NAME);
+}
+
+// 从端口文件读取实际端口
+function readPortFromFile() {
+  try {
+    const portFilePath = getPortFilePath();
+    if (fs.existsSync(portFilePath)) {
+      const content = fs.readFileSync(portFilePath, 'utf8').trim();
+      const port = parseInt(content, 10);
+      if (port >= 1 && port <= 65535) {
+        console.log(`[Port] 从端口文件读取到端口: ${port}`);
+        return port;
+      }
+    }
+  } catch (error) {
+    console.warn('[Port] 读取端口文件失败:', error.message);
+  }
+  return null;
+}
+
+// 用于跟踪健康检查是否已完成
+let healthCheckComplete = false;
+
 function checkBackendHealth(retryCount = 0) {
-  const https = require('https');
+  // 如果已经完成健康检查，不再继续
+  if (healthCheckComplete) {
+    return;
+  }
+  
+  // 尝试从端口文件读取实际端口
+  const portFromFile = readPortFromFile();
+  if (portFromFile) {
+    actualBackendPort = portFromFile;
+  }
+  
+  const http = require('http');
   const maxRetries = 10;
   const retryDelay = 2000;
   
-  // Configure HTTPS agent to trust self-signed certificate
-  const agent = new https.Agent({
-    rejectUnauthorized: false, // Trust self-signed certificates for local development
-  });
-  
   const options = {
     hostname: 'localhost',
-    port: BACKEND_PORT,
+    port: actualBackendPort,
     path: '/history',
     method: 'GET',
-    agent: agent,
     timeout: 3000,
   };
 
-  console.log(`[Health] 健康检查尝试 ${retryCount + 1}/${maxRetries} - ${BACKEND_PROTOCOL}://localhost:${BACKEND_PORT}/history`);
+  console.log(`[Health] 健康检查尝试 ${retryCount + 1}/${maxRetries} - ${BACKEND_PROTOCOL}://localhost:${actualBackendPort}/history`);
 
-  const req = https.request(options, (res) => {
+  const req = http.request(options, (res) => {
+    // 必须消费响应数据，否则请求不会正确结束
+    res.resume();
+    
     console.log(`[Health] 收到响应，状态码: ${res.statusCode}`);
     
     if (res.statusCode === 200) {
+      // 标记健康检查已完成，防止后续重试
+      healthCheckComplete = true;
       console.log('[Health] ✓ 后端服务已启动并响应正常');
       if (mainWindow) {
         mainWindow.webContents.send('backend-ready');
       }
     } else {
       console.warn(`[Health] ✗ 后端服务响应异常，状态码: ${res.statusCode}`);
-      if (retryCount < maxRetries) {
+      if (retryCount < maxRetries - 1) {
         console.log(`[Health] 将在 ${retryDelay}ms 后重试...`);
         setTimeout(() => checkBackendHealth(retryCount + 1), retryDelay);
       } else {
@@ -375,14 +511,14 @@ function checkBackendHealth(retryCount = 0) {
   });
 
   req.on('error', (err) => {
-    console.error(`[Health] ✗ 健康检查请求失败: ${err.message}`);
-    console.error('[Health] 错误详情:', {
-      code: err.code,
-      message: err.message,
-      syscall: err.syscall,
-    });
+    // 如果已经完成健康检查，忽略错误
+    if (healthCheckComplete) {
+      return;
+    }
     
-    if (retryCount < maxRetries) {
+    console.error(`[Health] ✗ 健康检查请求失败: ${err.message}`);
+    
+    if (retryCount < maxRetries - 1) {
       console.log(`[Health] 将在 ${retryDelay}ms 后重试...`);
       setTimeout(() => checkBackendHealth(retryCount + 1), retryDelay);
     } else {
@@ -390,8 +526,7 @@ function checkBackendHealth(retryCount = 0) {
       console.error('[Health]', errorMsg);
       console.error('[Health] 可能的原因:');
       console.error('  1. 后端进程未成功启动');
-      console.error('  2. TLS 证书配置错误');
-      console.error('  3. 端口被占用或防火墙阻止');
+      console.error('  2. 端口被占用或防火墙阻止');
       if (mainWindow) {
         mainWindow.webContents.send('backend-error', `后端服务无法连接: ${err.message}`);
       }
@@ -399,10 +534,16 @@ function checkBackendHealth(retryCount = 0) {
   });
 
   req.on('timeout', () => {
+    // 如果已经完成健康检查，忽略超时
+    if (healthCheckComplete) {
+      req.destroy();
+      return;
+    }
+    
     req.destroy();
     console.warn(`[Health] ✗ 健康检查超时 (${options.timeout}ms)`);
     
-    if (retryCount < maxRetries) {
+    if (retryCount < maxRetries - 1) {
       console.log(`[Health] 将在 ${retryDelay}ms 后重试...`);
       setTimeout(() => checkBackendHealth(retryCount + 1), retryDelay);
     } else {
@@ -419,6 +560,11 @@ function checkBackendHealth(retryCount = 0) {
 
 function createWindow() {
   console.log('[Window] 创建主窗口...');
+  
+  // 设置中文菜单
+  const menu = createChineseMenu();
+  Menu.setApplicationMenu(menu);
+  console.log('[Window] ✓ 中文菜单已设置');
   
   // 使用 focus.ico 作为应用图标
   const iconPath = path.join(__dirname, '..', 'assets', 'focus.ico');
@@ -498,20 +644,6 @@ function createWindow() {
   console.log('[Window] ✓ 主窗口创建完成');
 }
 
-// 忽略自签名证书错误（用于本地 HTTPS 后端）
-app.commandLine.appendSwitch('ignore-certificate-errors');
-
-// 允许不安全的本地主机证书
-app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  // 只允许本地主机的证书错误
-  if (url.startsWith('https://localhost') || url.startsWith('https://127.0.0.1')) {
-    event.preventDefault();
-    callback(true);
-  } else {
-    callback(false);
-  }
-});
-
 // 获取应用数据目录（使用安装路径而不是 AppData）
 function getAppDataPath() {
   if (isDev) {
@@ -537,7 +669,7 @@ app.whenReady().then(async () => {
     fs.mkdirSync(userDataPath, { recursive: true });
   }
   
-  // Initialize logging
+  // Initialize logging (始终启用，用于调试 API 问题)
   const logsDir = path.join(userDataPath, 'logs');
   if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir, { recursive: true });
@@ -693,23 +825,6 @@ function cleanup() {
     console.error('[Cleanup] ✗ Failed to clean temporary files:', error.message);
   }
   
-  // Clean up old/expired certificates if needed
-  try {
-    if (tlsManager) {
-      console.log('[Cleanup] 检查 TLS 证书状态...');
-      const { certPath, keyPath } = tlsManager.getCertificatePaths();
-      
-      // Check if certificates exist and are valid
-      if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-        // Certificates are kept for reuse unless they're expired
-        // The TLSManager will regenerate them on next startup if needed
-        console.log('[Cleanup] TLS 证书保留以供下次使用');
-      }
-    }
-  } catch (error) {
-    console.error('[Cleanup] ✗ 检查证书状态失败:', error.message);
-  }
-  
   // Close main window if still open
   if (mainWindow && !mainWindow.isDestroyed()) {
     console.log('[Cleanup] 关闭主窗口...');
@@ -814,7 +929,12 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // IPC 处理
 ipcMain.handle('get-backend-url', () => {
-  const url = `${BACKEND_PROTOCOL}://localhost:${BACKEND_PORT}`;
+  // 尝试从端口文件读取最新端口
+  const portFromFile = readPortFromFile();
+  if (portFromFile) {
+    actualBackendPort = portFromFile;
+  }
+  const url = `${BACKEND_PROTOCOL}://localhost:${actualBackendPort}`;
   console.log('[IPC] get-backend-url 请求，返回:', url);
   return url;
 });
@@ -839,6 +959,65 @@ ipcMain.handle('get-paths', () => {
   };
   console.log('[IPC] get-paths request, returning:', paths);
   return paths;
+});
+
+// 保存图片到用户选择的位置
+ipcMain.handle('save-image', async (event, { imageData, defaultFileName }) => {
+  const { dialog } = require('electron');
+  
+  try {
+    // 显示保存对话框让用户选择保存位置
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '保存图片',
+      defaultPath: defaultFileName || `image_${Date.now()}.png`,
+      filters: [
+        { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    });
+    
+    if (result.canceled || !result.filePath) {
+      console.log('[IPC] save-image: 用户取消保存');
+      return { success: false, canceled: true };
+    }
+    
+    // 将 base64 或 data URL 转换为 Buffer 并保存
+    let buffer;
+    if (imageData.startsWith('data:')) {
+      // 处理 data URL
+      const base64Data = imageData.split(',')[1];
+      buffer = Buffer.from(base64Data, 'base64');
+    } else if (imageData.startsWith('http')) {
+      // 处理远程 URL - 需要先下载
+      const https = require('https');
+      const http = require('http');
+      const protocol = imageData.startsWith('https') ? https : http;
+      
+      buffer = await new Promise((resolve, reject) => {
+        const agent = new https.Agent({ rejectUnauthorized: false });
+        const options = { agent: imageData.startsWith('https') ? agent : undefined };
+        
+        protocol.get(imageData, options, (response) => {
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(chunk));
+          response.on('end', () => resolve(Buffer.concat(chunks)));
+          response.on('error', reject);
+        }).on('error', reject);
+      });
+    } else {
+      // 假设是 base64 字符串
+      buffer = Buffer.from(imageData, 'base64');
+    }
+    
+    // 写入文件
+    fs.writeFileSync(result.filePath, buffer);
+    console.log('[IPC] save-image: 图片已保存到', result.filePath);
+    
+    return { success: true, filePath: result.filePath };
+  } catch (error) {
+    console.error('[IPC] save-image: 保存失败', error);
+    return { success: false, error: error.message };
+  }
 });
 
 console.log('[IPC] IPC 处理器已注册');

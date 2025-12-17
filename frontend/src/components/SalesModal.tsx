@@ -63,7 +63,7 @@ export default function SalesModal({
           <div className="text-sm text-gray-600 mb-3">扫码联系销售顾问</div>
           <div className="inline-block p-3 bg-white rounded-xl border border-gray-200 shadow-sm">
             <img 
-              src="./sales_wxchat.jpg" 
+              src="./dyf_wxchat.jpg" 
               alt="销售微信二维码" 
               className="w-40 h-40 object-contain"
             />

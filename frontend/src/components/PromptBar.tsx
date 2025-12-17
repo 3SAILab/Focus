@@ -1,26 +1,42 @@
 import { useState, useRef, useEffect } from 'react';
-import { ArrowRight, Loader2, Settings, Upload } from 'lucide-react';
+import { ArrowRight, Loader2, Settings, Upload, Grid2X2 } from 'lucide-react';
 import ImageUpload from './ImageUpload';
 import AspectRatioSelector, { aspectRatiosConfig } from './AspectRatioSelector';
-import type { AspectRatio, GenerateResponse } from '../type';
+import CountSelector from './CountSelector';
+import type { AspectRatio, GenerateResponse, GenerateMultiResponse, ImageCount, GenerationTypeValue } from '../type';
+import { GenerationType } from '../type';
+import type { SSEStartEvent, SSEImageEvent, SSECompleteEvent } from '../api';
 import { api } from '../api';
 import { useToast } from '../context/ToastContext';
+import { useGlobalTask } from '../context/GlobalTaskContext';
 import { getErrorMessage } from '../utils/errorHandler';
 
 interface PromptBarProps {
   onGenerate: (response: GenerateResponse) => void;
-  onGenerateStart?: () => void;
-  onError: (error: string) => void;
+  onGenerateMulti?: (response: GenerateMultiResponse) => void; // 新增：多图生成回调
+  onGenerateStart?: (prompt?: string, imageCount?: number) => void; // 更新：传递图片数量
+  onError: (error: string, prompt?: string, imageCount?: number) => void; // 更新：传递图片数量
   onPreviewImage?: (url: string) => void;
   initialPrompt?: string;
   initialFiles?: File[];
   onFilesChange?: (files: File[]) => void; // 新增：用于父子组件文件状态同步
   triggerGenerate?: boolean;
   onTriggered?: () => void;
+  // SSE 流式回调
+  onSSEStart?: (event: SSEStartEvent) => void;
+  onSSEImage?: (event: SSEImageEvent) => void;
+  onSSEComplete?: (event: SSECompleteEvent) => void;
+  // 禁用状态（外部控制，用于创作工坊生成时禁用输入）
+  disabled?: boolean;
+  // 异步任务创建回调（用于通知父组件任务 ID）
+  onTaskCreated?: (taskId: string) => void;
+  // 提示词更新版本号（用于强制更新 initialPrompt）
+  promptVersion?: number;
 }
 
 export default function PromptBar({
   onGenerate,
+  onGenerateMulti,
   onGenerateStart,
   onError,
   onPreviewImage,
@@ -29,22 +45,38 @@ export default function PromptBar({
   onFilesChange,
   triggerGenerate = false,
   onTriggered,
+  onSSEStart,
+  onSSEImage,
+  onSSEComplete,
+  disabled = false,
+  onTaskCreated,
+  promptVersion = 0,
 }: PromptBarProps) {
   const toast = useToast();
+  const { registerTask } = useGlobalTask();
+  
+  // 综合禁用状态：外部禁用或正在生成
+  const isDisabled = disabled || false;
   const [prompt, setPrompt] = useState(initialPrompt);
   const [files, setFiles] = useState<File[]>(initialFiles);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('智能');
   const [showAspectSelector, setShowAspectSelector] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDragging, setIsDragging] = useState(false); // 新增：拖拽状态
+  const [imageCount, setImageCount] = useState<ImageCount>(1); // 新增：生成数量状态
+  const [showCountSelector, setShowCountSelector] = useState(false); // 新增：数量选择器显示状态
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const aspectSelectorRef = useRef<HTMLDivElement>(null);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const countSelectorRef = useRef<HTMLDivElement>(null);
+  const countBtnRef = useRef<HTMLButtonElement>(null);
 
+  // 当 initialPrompt 或 promptVersion 变化时更新 prompt
+  // promptVersion 用于强制更新，即使 initialPrompt 值相同
   useEffect(() => {
     setPrompt(initialPrompt);
-  }, [initialPrompt]);
+  }, [initialPrompt, promptVersion]);
 
   useEffect(() => {
     setFiles(initialFiles);
@@ -68,18 +100,50 @@ export default function PromptBar({
           }
 
           setIsGenerating(true);
-          onGenerateStart?.();
+          onGenerateStart?.(prompt, imageCount); // 传递图片数量
 
           try {
             const formData = new FormData();
             formData.append('prompt', prompt || ' ');
             formData.append('aspectRatio', aspectRatio === '智能' ? '1:1' : aspectRatio);
             formData.append('imageSize', '2K');
+            formData.append('count', String(imageCount)); // 传递生成数量
             
             files.forEach((file) => {
               formData.append('images', file);
             });
 
+            // 多图生成使用 SSE 流式接口
+            if (imageCount > 1 && (onSSEStart || onSSEImage || onSSEComplete)) {
+              await api.generateWithSSE(formData, {
+                onStart: (event) => {
+                  console.log('[PromptBar] SSE Start:', event);
+                  onSSEStart?.(event);
+                },
+                onImage: (event) => {
+                  console.log('[PromptBar] SSE Image:', event);
+                  onSSEImage?.(event);
+                },
+                onComplete: (event) => {
+                  console.log('[PromptBar] SSE Complete:', event);
+                  onSSEComplete?.(event);
+                  // 清空输入
+                  setPrompt('');
+                  updateFiles([]);
+                  if(textareaRef.current) textareaRef.current.style.height = '80px';
+                  setIsGenerating(false);
+                },
+                onError: (error) => {
+                  console.error('[PromptBar] SSE Error:', error);
+                  const message = error.message || '生成失败';
+                  onError(message, prompt, imageCount);
+                  setIsGenerating(false);
+                },
+              });
+              return; // SSE 模式下，回调会处理后续逻辑
+            }
+
+            // 单图或无 SSE 回调时，使用传统方式
             const response = await api.generate(formData);
 
             if (!response.ok) {
@@ -89,19 +153,40 @@ export default function PromptBar({
               throw new Error(errorMsg);
             }
 
-            const data: GenerateResponse = await response.json();
+            const data = await response.json();
             
-            if (data.image_url) {
-              onGenerate(data);
+            // 处理多图响应 (Requirements: 5.2)
+            if (imageCount > 1 && data.images && onGenerateMulti) {
+              // 多图响应格式
+              onGenerateMulti(data as GenerateMultiResponse);
+              setPrompt('');
+              updateFiles([]);
+              if(textareaRef.current) textareaRef.current.style.height = '80px';
+            } else if (data.image_url) {
+              // 单图响应格式 (向后兼容 - 同步模式)
+              onGenerate(data as GenerateResponse);
               setPrompt('');
               updateFiles([]); // 生成成功后清空文件
               if(textareaRef.current) textareaRef.current.style.height = '80px';
+            } else if (data.task_id) {
+              // 异步模式：后端返回 task_id，前端需要轮询
+              // 注册任务到 GlobalTaskContext，它会处理轮询和 toast 通知
+              registerTask(data.task_id, GenerationType.CREATE as GenerationTypeValue);
+              // 通知父组件任务 ID
+              onTaskCreated?.(data.task_id);
+              // 清空输入
+              setPrompt('');
+              updateFiles([]);
+              if(textareaRef.current) textareaRef.current.style.height = '80px';
+              // 注意：不要在这里设置 setIsGenerating(false)
+              // 让 Create 页面通过 task recovery 来处理
+              return; // 提前返回，不执行 finally 中的 setIsGenerating(false)
             } else {
               throw new Error('后端未返回图片地址');
             }
           } catch (error) {
             const message = error instanceof Error ? error.message : '生成失败';
-            onError(message);
+            onError(message, prompt, imageCount); // 传递图片数量
           } finally {
             setIsGenerating(false);
           }
@@ -111,10 +196,11 @@ export default function PromptBar({
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [triggerGenerate, prompt, files, isGenerating, aspectRatio, onGenerate, onGenerateStart, onError, onTriggered, toast]);
+  }, [triggerGenerate, prompt, files, isGenerating, aspectRatio, imageCount, onGenerate, onGenerateMulti, onGenerateStart, onError, onTriggered, toast, onSSEStart, onSSEImage, onSSEComplete, registerTask]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      // 处理比例选择器
       if (settingsBtnRef.current && settingsBtnRef.current.contains(event.target as Node)) {
         return;
       }
@@ -125,10 +211,22 @@ export default function PromptBar({
       ) {
         setShowAspectSelector(false);
       }
+      
+      // 处理数量选择器
+      if (countBtnRef.current && countBtnRef.current.contains(event.target as Node)) {
+        return;
+      }
+      if (
+        showCountSelector &&
+        countSelectorRef.current &&
+        !countSelectorRef.current.contains(event.target as Node)
+      ) {
+        setShowCountSelector(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showAspectSelector]);
+  }, [showAspectSelector, showCountSelector]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -246,18 +344,50 @@ export default function PromptBar({
     }
 
     setIsGenerating(true);
-    onGenerateStart?.();
+    onGenerateStart?.(prompt, imageCount); // 传递图片数量
 
     try {
       const formData = new FormData();
       formData.append('prompt', prompt || ' ');
       formData.append('aspectRatio', aspectRatio === '智能' ? '1:1' : aspectRatio);
       formData.append('imageSize', '2K');
+      formData.append('count', String(imageCount)); // 传递生成数量
       
       files.forEach((file) => {
         formData.append('images', file);
       });
 
+      // 多图生成使用 SSE 流式接口
+      if (imageCount > 1 && (onSSEStart || onSSEImage || onSSEComplete)) {
+        await api.generateWithSSE(formData, {
+          onStart: (event) => {
+            console.log('[PromptBar] SSE Start:', event);
+            onSSEStart?.(event);
+          },
+          onImage: (event) => {
+            console.log('[PromptBar] SSE Image:', event);
+            onSSEImage?.(event);
+          },
+          onComplete: (event) => {
+            console.log('[PromptBar] SSE Complete:', event);
+            onSSEComplete?.(event);
+            // 清空输入
+            setPrompt('');
+            updateFiles([]);
+            if(textareaRef.current) textareaRef.current.style.height = '80px';
+            setIsGenerating(false);
+          },
+          onError: (error) => {
+            console.error('[PromptBar] SSE Error:', error);
+            const message = error.message || '生成失败';
+            onError(message, prompt, imageCount);
+            setIsGenerating(false);
+          },
+        });
+        return; // SSE 模式下，回调会处理后续逻辑
+      }
+
+      // 单图或无 SSE 回调时，使用传统方式
       const response = await api.generate(formData);
 
       if (!response.ok) {
@@ -267,19 +397,40 @@ export default function PromptBar({
         throw new Error(errorMsg);
       }
 
-      const data: GenerateResponse = await response.json();
+      const data = await response.json();
       
-      if (data.image_url) {
-        onGenerate(data);
+      // 处理多图响应 (Requirements: 5.2)
+      if (imageCount > 1 && data.images && onGenerateMulti) {
+        // 多图响应格式
+        onGenerateMulti(data as GenerateMultiResponse);
+        setPrompt('');
+        updateFiles([]);
+        if(textareaRef.current) textareaRef.current.style.height = '80px';
+      } else if (data.image_url) {
+        // 单图响应格式 (向后兼容 - 同步模式)
+        onGenerate(data as GenerateResponse);
         setPrompt('');
         updateFiles([]); // 生成成功后清空文件
         if(textareaRef.current) textareaRef.current.style.height = '80px';
+      } else if (data.task_id) {
+        // 异步模式：后端返回 task_id，前端需要轮询
+        // 注册任务到 GlobalTaskContext，它会处理轮询和 toast 通知
+        registerTask(data.task_id, GenerationType.CREATE as GenerationTypeValue);
+        // 通知父组件任务 ID
+        onTaskCreated?.(data.task_id);
+        // 清空输入
+        setPrompt('');
+        updateFiles([]);
+        if(textareaRef.current) textareaRef.current.style.height = '80px';
+        // 注意：不要在这里设置 setIsGenerating(false)
+        // 让 Create 页面通过 task recovery 来处理
+        return; // 提前返回，不执行 finally 中的 setIsGenerating(false)
       } else {
         throw new Error('后端未返回图片地址');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : '生成失败';
-      onError(message);
+      onError(message, prompt, imageCount); // 传递图片数量
     } finally {
       setIsGenerating(false);
     }
@@ -300,13 +451,13 @@ export default function PromptBar({
     : 'focus-within:ring-2 focus-within:ring-red-500/20 focus-within:border-red-500 focus-within:bg-white bg-gray-50 border-gray-200';
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-gray-100 px-6 py-6 shadow-[0_-5px_30px_rgba(0,0,0,0.03)]">
+    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 z-40 w-full max-w-4xl px-4 pb-6">
       
       <div 
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`max-w-4xl mx-auto relative flex items-end rounded-[28px] p-2 transition-all duration-300 border shadow-inner ${containerStyle}`}
+        className={`relative flex items-end rounded-[28px] p-2 transition-all duration-300 border shadow-lg bg-white/80 backdrop-blur-xl ${containerStyle}`}
       >
         
         {/* 拖拽上传时的遮罩层 */}
@@ -339,7 +490,7 @@ export default function PromptBar({
             className="w-full bg-transparent border-none outline-none text-gray-800 placeholder-gray-400 text-base leading-relaxed resize-none py-1"
             rows={3}
             placeholder="描述你想要的画面，或拖入/粘贴图片..."
-            disabled={isGenerating}
+            disabled={isGenerating || isDisabled}
             style={{ minHeight: '80px' }}
           />
         </div>
@@ -356,9 +507,25 @@ export default function PromptBar({
             </div>
           )}
 
+          {showCountSelector && (
+            <div ref={countSelectorRef} className="absolute bottom-[105%] right-0 z-50">
+              <CountSelector
+                value={imageCount}
+                onChange={(count) => {
+                  setImageCount(count);
+                  setShowCountSelector(false);
+                }}
+                disabled={isGenerating || isDisabled}
+              />
+            </div>
+          )}
+
           <button
             ref={settingsBtnRef}
-            onClick={() => setShowAspectSelector(!showAspectSelector)}
+            onClick={() => {
+              setShowAspectSelector(!showAspectSelector);
+              setShowCountSelector(false); // 关闭数量选择器
+            }}
             className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all border text-xs font-medium w-full ${
               aspectRatio !== '智能' || showAspectSelector
                 ? 'bg-red-50 text-red-600 border-red-100' 
@@ -371,8 +538,25 @@ export default function PromptBar({
           </button>
 
           <button
+            ref={countBtnRef}
+            onClick={() => {
+              setShowCountSelector(!showCountSelector);
+              setShowAspectSelector(false); // 关闭比例选择器
+            }}
+            className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all border text-xs font-medium w-full ${
+              imageCount > 1 || showCountSelector
+                ? 'bg-red-50 text-red-600 border-red-100' 
+                : 'bg-white text-gray-400 border-gray-200 hover:text-gray-600 hover:bg-gray-50'
+            }`}
+            title="选择生成数量"
+          >
+            <Grid2X2 className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-300 ${showCountSelector ? 'rotate-90' : ''}`} />
+            <span className="truncate">{imageCount}张</span>
+          </button>
+
+          <button
             onClick={handleSubmit}
-            disabled={isGenerating || (!prompt.trim() && files.length === 0)}
+            disabled={isGenerating || isDisabled || (!prompt.trim() && files.length === 0)}
             className="btn-red w-12 h-12 rounded-xl flex items-center justify-center shadow-lg shadow-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95 shrink-0"
           >
             {isGenerating ? (

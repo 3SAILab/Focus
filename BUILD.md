@@ -716,6 +716,102 @@ Linux:   ~/.config/SIGMA/
 
 ---
 
+## 批量销售打包
+
+本节介绍如何为多个销售人员批量生成独立的安装包，每个安装包包含对应销售的微信二维码图片。
+
+### 准备工作
+
+1. **准备销售二维码图片**
+
+   将每个销售的微信二维码图片放置在 `frontend/dist/` 目录下，文件命名格式为：
+   ```
+   {销售名}_wxchat.jpg
+   ```
+   
+   例如：
+   ```
+   frontend/dist/
+   ├── dyf_wxchat.jpg      # 销售 dyf 的二维码
+   ├── lyq_wxchat.jpg      # 销售 lyq 的二维码
+   ├── mzl_wxchat.jpg      # 销售 mzl 的二维码
+   └── sales_wxchat.jpg    # 默认二维码（可选）
+   ```
+
+2. **确保前端和后端已构建**
+
+   批量打包脚本只执行 Electron 打包步骤，需要先完成前端和后端的构建：
+   ```bash
+   npm run build:frontend
+   npm run build:backend:win
+   npm run validate:build
+   ```
+
+### 批量打包所有销售
+
+为所有销售人员生成安装包：
+
+```bash
+npm run build:all-sales
+```
+
+脚本会自动：
+1. 扫描 `frontend/dist/` 目录下所有 `*_wxchat.jpg` 文件
+2. 为每个销售生成独立的安装包
+3. 输出到对应的 `release-{销售名}/` 目录
+
+**输出示例：**
+```
+release-dyf/
+  └── Focus-1.0.1-x64.exe
+release-lyq/
+  └── Focus-1.0.1-x64.exe
+release-mzl/
+  └── Focus-1.0.1-x64.exe
+```
+
+### 打包单个销售
+
+只为指定的销售人员生成安装包：
+
+```bash
+npm run build:sales -- --sales=dyf
+```
+
+或直接运行脚本：
+
+```bash
+node scripts/batch-build.js --sales=dyf
+```
+
+### 查看帮助
+
+```bash
+node scripts/batch-build.js --help
+```
+
+### 进度显示
+
+批量打包过程中会显示：
+- 开始时：找到的销售人员总数
+- 进行中：当前进度（如 "Building 2/6: lyq"）
+- 完成时：成功和失败的构建摘要
+
+### 错误处理
+
+- 如果某个销售的打包失败，脚本会记录错误并继续处理下一个
+- 最终会显示所有成功和失败的构建列表
+- 如果指定的销售名不存在，会显示所有可用的销售名称
+
+### 注意事项
+
+- 批量打包会临时替换 `frontend/dist/sales_wxchat.jpg` 文件
+- 打包完成后会自动恢复原始文件（如果存在）
+- 每个安装包的输出目录独立，不会相互覆盖
+- 建议在打包前先运行 `npm run clean` 清理旧的构建产物
+
+---
+
 ## 发布检查清单
 
 在发布应用前，请确保：

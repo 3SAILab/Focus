@@ -12,7 +12,7 @@ backend/backend
 
 # Test binary, built with `go test -c`
 *.test
-
+*.xlsx
 # Output of the go coverage tool
 *.out
 

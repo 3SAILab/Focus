@@ -24,6 +24,11 @@ type GenerationHistory struct {
 	FileName       string `json:"file_name"`
 	RefImages      string `json:"ref_images"`
 	Type           string `json:"type" gorm:"default:create"` // 生成类型: create | white_background
+	ErrorMsg       string `json:"error_msg,omitempty"`        // 错误信息（失败时保存）
+	// 多图生成批次字段（可空，用于安全迁移）
+	BatchID    *string `json:"batch_id,omitempty" gorm:"index"`    // 批次 ID，关联同一次生成的多张图片
+	BatchIndex *int    `json:"batch_index,omitempty"`              // 批次内序号 (0-3)
+	BatchTotal *int    `json:"batch_total,omitempty"`              // 批次总数 (1-4)
 }
 
 // GenerationHistoryResponse 响应结构体
@@ -35,6 +40,11 @@ type GenerationHistoryResponse struct {
 	FileName       string    `json:"file_name"`
 	RefImages      string    `json:"ref_images"`
 	Type           string    `json:"type"`
+	ErrorMsg       string    `json:"error_msg,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	// 多图生成批次字段
+	BatchID    *string `json:"batch_id,omitempty"`
+	BatchIndex *int    `json:"batch_index,omitempty"`
+	BatchTotal *int    `json:"batch_total,omitempty"`
 }

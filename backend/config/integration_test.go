@@ -17,17 +17,12 @@ func TestElectronEnvironmentSimulation(t *testing.T) {
 		electronUploadDir := filepath.Join(tempUserData, "uploads")
 		electronDBDir := filepath.Join(tempUserData, "db")
 		electronDBPath := filepath.Join(electronDBDir, "history.db")
-		electronTLSCertPath := filepath.Join(tempUserData, "tls", "cert.pem")
-		electronTLSKeyPath := filepath.Join(tempUserData, "tls", "key.pem")
 		
 		// 设置环境变量
 		os.Setenv("OUTPUT_DIR", electronOutputDir)
 		os.Setenv("UPLOAD_DIR", electronUploadDir)
 		os.Setenv("DB_PATH", electronDBPath)
 		os.Setenv("PORT", "8080")
-		os.Setenv("TLS_CERT_PATH", electronTLSCertPath)
-		os.Setenv("TLS_KEY_PATH", electronTLSKeyPath)
-		os.Setenv("USE_TLS", "true")
 		
 		// 初始化配置
 		Init()
@@ -41,15 +36,6 @@ func TestElectronEnvironmentSimulation(t *testing.T) {
 		}
 		if DBPath != electronDBPath {
 			t.Errorf("DBPath 不匹配: 期望 %s, 实际 %s", electronDBPath, DBPath)
-		}
-		if TLSCertPath != electronTLSCertPath {
-			t.Errorf("TLSCertPath 不匹配: 期望 %s, 实际 %s", electronTLSCertPath, TLSCertPath)
-		}
-		if TLSKeyPath != electronTLSKeyPath {
-			t.Errorf("TLSKeyPath 不匹配: 期望 %s, 实际 %s", electronTLSKeyPath, TLSKeyPath)
-		}
-		if !TLSEnabled {
-			t.Error("TLS 应该被启用")
 		}
 		
 		// 模拟后端启动时创建目录
@@ -91,8 +77,6 @@ func TestElectronEnvironmentSimulation(t *testing.T) {
 		t.Logf("  - 输出目录: %s", OutputDir)
 		t.Logf("  - 上传目录: %s", UploadDir)
 		t.Logf("  - 数据库路径: %s", DBPath)
-		t.Logf("  - TLS 证书: %s", TLSCertPath)
-		t.Logf("  - TLS 密钥: %s", TLSKeyPath)
 	})
 	
 	t.Run("验证路径在不同操作系统上的兼容性", func(t *testing.T) {

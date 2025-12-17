@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ArrowRight, Package } from 'lucide-react';
 import ImageContextMenu from '../components/ImageContextMenu';
-import PlaceholderCard from '../components/PlaceholderCard';
 import Lightbox from '../components/Lightbox';
 import {
   PageHeader,
@@ -13,11 +12,11 @@ import {
 import { useImageUpload } from '../hooks/useImageUpload';
 import type { GenerationHistory, GenerationTask } from '../type';
 import { GenerationType } from '../type';
-import { api } from '../api';
 import { useToast } from '../context/ToastContext';
 import { getImageAspectRatio } from '../utils/aspectRatio';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useTaskRecovery } from '../hooks/useTaskRecovery';
+import { useAsyncGeneration } from '../hooks/useAsyncGeneration';
 import { buildProductScenePrompt } from '../utils/promptBuilder';
 
 export default function ProductScene() {
@@ -30,7 +29,6 @@ export default function ProductScene() {
   const [productName, setProductName] = useState('');
   const [sceneDescription, setSceneDescription] = useState('');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<GenerationHistory[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [counterRefresh, setCounterRefresh] = useState(0);
@@ -45,6 +43,7 @@ export default function ProductScene() {
 
   const loadHistory = useCallback(async () => {
     try {
+      const { api } = await import('../api');
       const response = await api.getProductSceneHistory();
       if (response.ok) {
         const data = await response.json();
@@ -55,7 +54,8 @@ export default function ProductScene() {
     }
   }, []);
 
-  // Task recovery callbacks
+  // Task completion callback
+  // Note: Toast is shown by GlobalTaskContext, this only updates local state
   const handleTaskComplete = useCallback((task: GenerationTask) => {
     console.log('[ProductScene] Task completed:', task.task_id);
     if (task.image_url) {
@@ -63,20 +63,32 @@ export default function ProductScene() {
     }
     loadHistory();
     setCounterRefresh(prev => prev + 1);
-    toast.success('商品图生成完成！');
-  }, [loadHistory, toast]);
+  }, [loadHistory]);
 
-  const handleTaskFailed = useCallback((task: GenerationTask) => {
-    console.log('[ProductScene] Task failed:', task.task_id, task.error_msg);
-    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+  // Error callback
+  const handleError = useCallback((errorMsg: string, isQuotaError: boolean) => {
+    console.log('[ProductScene] Error:', errorMsg, 'isQuotaError:', isQuotaError);
     if (isQuotaError) {
       setShowQuotaError(true);
     } else {
+      const { message } = getErrorMessage(errorMsg);
       toast.error('生成失败: ' + message);
     }
   }, [toast]);
 
-  // Use task recovery hook to restore in-progress tasks after page refresh
+  const handleTaskFailed = useCallback((task: GenerationTask) => {
+    console.log('[ProductScene] Task failed:', task.task_id, task.error_msg);
+    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+    handleError(message, isQuotaError);
+  }, [handleError]);
+
+  // Async generation hook
+  const { isGenerating, startGeneration } = useAsyncGeneration({
+    onComplete: handleTaskComplete,
+    onError: handleError,
+  });
+
+  // Task recovery hook
   const { processingTasks, isRecovering } = useTaskRecovery({
     type: GenerationType.PRODUCT_SCENE,
     onTaskComplete: handleTaskComplete,
@@ -132,7 +144,6 @@ export default function ProductScene() {
       return;
     }
 
-    setIsGenerating(true);
     const prompt = buildProductScenePrompt(productName.trim(), sceneDescription.trim());
 
     try {
@@ -146,37 +157,11 @@ export default function ProductScene() {
       formData.append('type', GenerationType.PRODUCT_SCENE);
       formData.append('images', uploadedFile);
 
-      const response = await api.generate(formData);
-
-      if (!response.ok) {
-        const errData = await response.json();
-        const { message: errorMsg, isQuotaError } = getErrorMessage(errData, response.status);
-        if (isQuotaError) {
-          setShowQuotaError(true);
-          return;
-        }
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      
-      if (data.image_url) {
-        setGeneratedImage(data.image_url);
-        setCounterRefresh(prev => prev + 1);
-        await loadHistory();
-        toast.success('商品图生成成功！');
-      } else {
-        throw new Error('未返回图片');
-      }
+      // 使用异步生成
+      await startGeneration(formData);
     } catch (error) {
       const { message, isQuotaError } = getErrorMessage(error);
-      if (isQuotaError) {
-        setShowQuotaError(true);
-      } else {
-        toast.error(message);
-      }
-    } finally {
-      setIsGenerating(false);
+      handleError(message, isQuotaError);
     }
   };
 
@@ -277,13 +262,13 @@ export default function ProductScene() {
                   <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                   <p className="text-sm text-gray-500">正在恢复任务状态...</p>
                 </div>
-              ) : isGenerating || processingTasks.length > 0 ? (
-                /* Show loading state for generating or recovered processing tasks */
+              ) : isGenerating ? (
+                /* 当页点击生成时，动画显示在这里 */
                 <div className="aspect-square flex flex-col items-center justify-center">
-                  <PlaceholderCard />
-                  {processingTasks.length > 0 && (
-                    <p className="text-xs text-orange-500 mt-2">正在生成中...</p>
-                  )}
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-50 to-yellow-50 flex items-center justify-center mb-4 animate-pulse">
+                    <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                  <p className="text-sm text-gray-500">正在生成商品图...</p>
                 </div>
               ) : generatedImage ? (
                 <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
@@ -311,13 +296,14 @@ export default function ProductScene() {
             </div>
           </div>
 
-          {/* History section */}
+          {/* History section - 只有恢复的任务才显示在这里 */}
           <HistorySection
             title="商品图历史记录"
             history={history}
             onImageClick={handleHistoryClick}
             onImagePreview={setLightboxImage}
             emptyText="暂无商品图生成记录"
+            processingTasks={processingTasks}
           />
         </div>
       </div>

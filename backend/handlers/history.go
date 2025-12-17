@@ -67,6 +67,9 @@ func HistoryHandler(c *gin.Context) {
 			Type:           h.Type,
 			CreatedAt:      h.CreatedAt,
 			UpdatedAt:      h.UpdatedAt,
+			BatchID:        h.BatchID,
+			BatchIndex:     h.BatchIndex,
+			BatchTotal:     h.BatchTotal,
 		}
 	}
 
@@ -116,6 +119,9 @@ func WhiteBackgroundHistoryHandler(c *gin.Context) {
 			Type:           h.Type,
 			CreatedAt:      h.CreatedAt,
 			UpdatedAt:      h.UpdatedAt,
+			BatchID:        h.BatchID,
+			BatchIndex:     h.BatchIndex,
+			BatchTotal:     h.BatchTotal,
 		}
 	}
 
@@ -167,6 +173,114 @@ func ClothingChangeHistoryHandler(c *gin.Context) {
 			Type:           h.Type,
 			CreatedAt:      h.CreatedAt,
 			UpdatedAt:      h.UpdatedAt,
+			BatchID:        h.BatchID,
+			BatchIndex:     h.BatchIndex,
+			BatchTotal:     h.BatchTotal,
+		}
+	}
+
+	c.JSON(200, response)
+}
+
+
+// ProductSceneHistoryHandler 获取一键商品图历史记录
+func ProductSceneHistoryHandler(c *gin.Context) {
+	var history []models.GenerationHistory
+	query := config.DB.Model(&models.GenerationHistory{}).
+		Where("type = ?", models.GenerationTypeProductScene)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	switch {
+	case pageSize > 100:
+		pageSize = 100
+	case pageSize <= 0:
+		pageSize = 20
+	}
+
+	offset := (page - 1) * pageSize
+
+	result := query.Order("created_at desc").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&history)
+
+	if result.Error != nil {
+		c.JSON(500, gin.H{"error": "获取商品图历史记录失败"})
+		return
+	}
+
+	response := make([]models.GenerationHistoryResponse, len(history))
+	for i, h := range history {
+		response[i] = models.GenerationHistoryResponse{
+			ID:             h.ID,
+			Prompt:         h.Prompt,
+			OriginalPrompt: h.OriginalPrompt,
+			ImageURL:       h.ImageURL,
+			FileName:       h.FileName,
+			RefImages:      h.RefImages,
+			Type:           h.Type,
+			CreatedAt:      h.CreatedAt,
+			UpdatedAt:      h.UpdatedAt,
+			BatchID:        h.BatchID,
+			BatchIndex:     h.BatchIndex,
+			BatchTotal:     h.BatchTotal,
+		}
+	}
+
+	c.JSON(200, response)
+}
+
+// LightShadowHistoryHandler 获取光影融合历史记录
+func LightShadowHistoryHandler(c *gin.Context) {
+	var history []models.GenerationHistory
+	query := config.DB.Model(&models.GenerationHistory{}).
+		Where("type = ?", models.GenerationTypeLightShadow)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	switch {
+	case pageSize > 100:
+		pageSize = 100
+	case pageSize <= 0:
+		pageSize = 20
+	}
+
+	offset := (page - 1) * pageSize
+
+	result := query.Order("created_at desc").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&history)
+
+	if result.Error != nil {
+		c.JSON(500, gin.H{"error": "获取光影融合历史记录失败"})
+		return
+	}
+
+	response := make([]models.GenerationHistoryResponse, len(history))
+	for i, h := range history {
+		response[i] = models.GenerationHistoryResponse{
+			ID:             h.ID,
+			Prompt:         h.Prompt,
+			OriginalPrompt: h.OriginalPrompt,
+			ImageURL:       h.ImageURL,
+			FileName:       h.FileName,
+			RefImages:      h.RefImages,
+			Type:           h.Type,
+			CreatedAt:      h.CreatedAt,
+			UpdatedAt:      h.UpdatedAt,
+			BatchID:        h.BatchID,
+			BatchIndex:     h.BatchIndex,
+			BatchTotal:     h.BatchTotal,
 		}
 	}
 

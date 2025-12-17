@@ -1,10 +1,7 @@
 package handlers
 
 import (
-	"log"
-
 	"sigma/config"
-	"sigma/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -43,14 +40,8 @@ func SetApiKeyHandler(c *gin.Context) {
 		return
 	}
 
-	// 1. 更新内存
+	// 更新内存并持久化到 config.json
 	config.SetAPIToken(req.ApiKey)
-
-	// 2. 更新文件
-	if err := utils.UpdateEnvFile("API_KEY", req.ApiKey); err != nil {
-		log.Printf("写入 .env 失败: %v", err)
-		// 注意：即使写入文件失败，内存已更新，当前会话可用，所以不阻断返回
-	}
 
 	c.JSON(200, gin.H{"status": "success"})
 }
@@ -66,17 +57,8 @@ func SetDisclaimerHandler(c *gin.Context) {
 		return
 	}
 
-	// 1. 更新内存
+	// 更新内存并持久化到 config.json
 	config.SetDisclaimerAgreed(req.Agreed)
-
-	// 2. 更新文件
-	agreedStr := "false"
-	if req.Agreed {
-		agreedStr = "true"
-	}
-	if err := utils.UpdateEnvFile("DISCLAIMER_AGREED", agreedStr); err != nil {
-		log.Printf("写入 .env 失败: %v", err)
-	}
 
 	c.JSON(200, gin.H{"status": "success", "agreed": req.Agreed})
 }

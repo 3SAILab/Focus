@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { RotateCw, ImagePlus } from 'lucide-react';
+import { RotateCw, ImagePlus, Pencil } from 'lucide-react';
 import type { GenerationHistory } from '../type';
 import { GenerationType } from '../type';
 import { downloadImage } from '../utils';
@@ -12,6 +12,7 @@ interface ImageCardProps {
   onImageClick: (url: string) => void;
   onRefImageClick?: (url: string) => void;
   onRegenerate?: (item: GenerationHistory) => void;
+  onEditPrompt?: (item: GenerationHistory) => void; // 编辑提示词（不自动发送）
   onUseAsReference?: (url: string) => void;
   hidePrompt?: boolean; // 是否隐藏 prompt 显示
 }
@@ -32,6 +33,7 @@ export default function ImageCard({
   onImageClick,
   onRefImageClick,
   onRegenerate,
+  onEditPrompt,
   onUseAsReference,
   hidePrompt = false,
 }: ImageCardProps) {
@@ -56,16 +58,24 @@ export default function ImageCard({
   const handleDownload = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      await downloadImage(item.image_url);
-      toast.success('图片下载成功');
+      const saved = await downloadImage(item.image_url);
+      // 只有在实际保存成功时才显示成功提示，用户取消时不显示
+      if (saved) {
+        toast.success('图片保存成功');
+      }
     } catch (error) {
-      toast.error('下载失败，请稍后重试');
+      toast.error('保存失败，请稍后重试');
     }
   };
 
   const handleRegenerate = (e: React.MouseEvent) => {
     e.stopPropagation();
     onRegenerate?.(item);
+  };
+
+  const handleEditPrompt = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEditPrompt?.(item);
   };
 
   const handleUseAsReference = (e: React.MouseEvent) => {
@@ -150,6 +160,16 @@ export default function ImageCard({
             }`}
           >
             <div className="flex gap-2 pointer-events-auto">
+              {onEditPrompt && (
+                <button
+                  onClick={handleEditPrompt}
+                  className="text-white text-xs bg-white/20 backdrop-blur px-3 py-1.5 rounded-full hover:bg-white/40 cursor-pointer flex items-center gap-1.5 transition-all"
+                  title="重新编辑"
+                >
+                  <Pencil className="w-3 h-3" />
+                  重新编辑
+                </button>
+              )}
               {onRegenerate && (
                 <button
                   onClick={handleRegenerate}

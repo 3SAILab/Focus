@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ArrowRight, Sun } from 'lucide-react';
 import ImageContextMenu from '../components/ImageContextMenu';
-import PlaceholderCard from '../components/PlaceholderCard';
 import Lightbox from '../components/Lightbox';
 import {
   PageHeader,
@@ -13,11 +12,11 @@ import {
 import { useImageUpload } from '../hooks/useImageUpload';
 import type { GenerationHistory, GenerationTask } from '../type';
 import { GenerationType } from '../type';
-import { api } from '../api';
 import { useToast } from '../context/ToastContext';
 import { getImageAspectRatio } from '../utils/aspectRatio';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useTaskRecovery } from '../hooks/useTaskRecovery';
+import { useAsyncGeneration } from '../hooks/useAsyncGeneration';
 import { buildLightShadowPrompt } from '../utils/promptBuilder';
 
 export default function LightShadow() {
@@ -29,7 +28,6 @@ export default function LightShadow() {
   // State
   const [productName, setProductName] = useState('');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<GenerationHistory[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [counterRefresh, setCounterRefresh] = useState(0);
@@ -38,12 +36,12 @@ export default function LightShadow() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; url: string } | null>(null);
 
   // Validation: check if productName is valid (non-empty, non-whitespace)
-  // Requirements: 2.2
   const isProductNameValid = productName.trim().length > 0;
   const canGenerate = uploadedFile && isProductNameValid;
 
   const loadHistory = useCallback(async () => {
     try {
+      const { api } = await import('../api');
       const response = await api.getLightShadowHistory();
       if (response.ok) {
         const data = await response.json();
@@ -54,8 +52,8 @@ export default function LightShadow() {
     }
   }, []);
 
-
-  // Task recovery callbacks - Requirements: 2.4, 2.5
+  // Task completion callback
+  // Note: Toast is shown by GlobalTaskContext, this only updates local state
   const handleTaskComplete = useCallback((task: GenerationTask) => {
     console.log('[LightShadow] Task completed:', task.task_id);
     if (task.image_url) {
@@ -63,20 +61,32 @@ export default function LightShadow() {
     }
     loadHistory();
     setCounterRefresh(prev => prev + 1);
-    toast.success('光影融合完成！');
-  }, [loadHistory, toast]);
+  }, [loadHistory]);
 
-  const handleTaskFailed = useCallback((task: GenerationTask) => {
-    console.log('[LightShadow] Task failed:', task.task_id, task.error_msg);
-    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+  // Error callback
+  const handleError = useCallback((errorMsg: string, isQuotaError: boolean) => {
+    console.log('[LightShadow] Error:', errorMsg, 'isQuotaError:', isQuotaError);
     if (isQuotaError) {
       setShowQuotaError(true);
     } else {
+      const { message } = getErrorMessage(errorMsg);
       toast.error('生成失败: ' + message);
     }
   }, [toast]);
 
-  // Use task recovery hook to restore in-progress tasks after page refresh
+  const handleTaskFailed = useCallback((task: GenerationTask) => {
+    console.log('[LightShadow] Task failed:', task.task_id, task.error_msg);
+    const { message, isQuotaError } = getErrorMessage(task.error_msg);
+    handleError(message, isQuotaError);
+  }, [handleError]);
+
+  // Async generation hook
+  const { isGenerating, startGeneration } = useAsyncGeneration({
+    onComplete: handleTaskComplete,
+    onError: handleError,
+  });
+
+  // Task recovery hook
   const { processingTasks, isRecovering } = useTaskRecovery({
     type: GenerationType.LIGHT_SHADOW,
     onTaskComplete: handleTaskComplete,
@@ -117,7 +127,7 @@ export default function LightShadow() {
     setContextMenu(null);
   };
 
-  // Handle generate - Requirements: 2.3, 2.4, 2.5
+  // Handle generate
   const handleGenerate = async () => {
     if (!uploadedFile) {
       toast.warning('请先上传产品图片');
@@ -128,7 +138,6 @@ export default function LightShadow() {
       return;
     }
 
-    setIsGenerating(true);
     const prompt = buildLightShadowPrompt(productName.trim());
 
     try {
@@ -142,37 +151,11 @@ export default function LightShadow() {
       formData.append('type', GenerationType.LIGHT_SHADOW);
       formData.append('images', uploadedFile);
 
-      const response = await api.generate(formData);
-
-      if (!response.ok) {
-        const errData = await response.json();
-        const { message: errorMsg, isQuotaError } = getErrorMessage(errData, response.status);
-        if (isQuotaError) {
-          setShowQuotaError(true);
-          return;
-        }
-        throw new Error(errorMsg);
-      }
-
-      const data = await response.json();
-      
-      if (data.image_url) {
-        setGeneratedImage(data.image_url);
-        setCounterRefresh(prev => prev + 1);
-        await loadHistory();
-        toast.success('光影融合成功！');
-      } else {
-        throw new Error('未返回图片');
-      }
+      // 使用异步生成
+      await startGeneration(formData);
     } catch (error) {
       const { message, isQuotaError } = getErrorMessage(error);
-      if (isQuotaError) {
-        setShowQuotaError(true);
-      } else {
-        toast.error(message);
-      }
-    } finally {
-      setIsGenerating(false);
+      handleError(message, isQuotaError);
     }
   };
 
@@ -256,13 +239,13 @@ export default function LightShadow() {
                   <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mb-4"></div>
                   <p className="text-sm text-gray-500">正在恢复任务状态...</p>
                 </div>
-              ) : isGenerating || processingTasks.length > 0 ? (
-                /* Show loading state for generating or recovered processing tasks */
+              ) : isGenerating ? (
+                /* 当页点击生成时，动画显示在这里 */
                 <div className="aspect-square flex flex-col items-center justify-center">
-                  <PlaceholderCard />
-                  {processingTasks.length > 0 && (
-                    <p className="text-xs text-purple-500 mt-2">正在生成中...</p>
-                  )}
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center mb-4 animate-pulse">
+                    <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                  <p className="text-sm text-gray-500">正在增强光影效果...</p>
                 </div>
               ) : generatedImage ? (
                 <div className="relative aspect-square rounded-xl overflow-hidden bg-gray-100">
@@ -290,13 +273,14 @@ export default function LightShadow() {
             </div>
           </div>
 
-          {/* History section - Requirements: 2.6 */}
+          {/* History section - Requirements: 2.6 - 只有恢复的任务才显示在这里 */}
           <HistorySection
             title="光影融合历史记录"
             history={history}
             onImageClick={handleHistoryClick}
             onImagePreview={setLightboxImage}
             emptyText="暂无光影融合记录"
+            processingTasks={processingTasks}
           />
         </div>
       </div>

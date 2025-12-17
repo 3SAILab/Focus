@@ -19,8 +19,13 @@ export interface GenerationHistory {
   file_name: string;
   ref_images?: string; // JSON 字符串数组
   type?: GenerationTypeValue; // 生成类型
+  error_msg?: string;  // 错误信息（失败时）
   created_at: string;
   updated_at?: string;
+  // 多图生成批次信息
+  batch_id?: string;      // 批次 ID
+  batch_index?: number;   // 批次内序号 (0-3)
+  batch_total?: number;   // 批次总数
 }
 
 // 生成统计
@@ -42,6 +47,27 @@ export interface GenerateResponse {
   ref_images?: string[];
 }
 
+// 多图生成响应中的单个图片结果
+export interface MultiImageResult {
+  image_url?: string;
+  error?: string;
+}
+
+// 多图生成响应
+export interface GenerateMultiResponse {
+  images: MultiImageResult[];
+  prompt: string;
+  batch_id: string;
+}
+
+// ImageGrid 组件中单个图片项的状态
+export interface ImageGridItem {
+  url?: string;           // 图片 URL (成功时)
+  error?: string;         // 错误信息 (失败时)
+  isLoading?: boolean;    // 是否加载中
+  index: number;          // 在批次中的索引
+}
+
 export type AspectRatio = 
   | '智能' 
   | '21:9' 
@@ -54,6 +80,9 @@ export type AspectRatio =
   | '9:16';
 
 export type ImageSize = '2K';
+
+// 生成数量类型 (1-4)
+export type ImageCount = 1 | 2 | 3 | 4;
 
 
 // Task status type
@@ -72,4 +101,5 @@ export interface GenerationTask {
   started_at: string;
   created_at: string;
   updated_at: string;
+  image_count: number; // 请求生成的图片数量 (1-4)
 }

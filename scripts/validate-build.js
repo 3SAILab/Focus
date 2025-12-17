@@ -84,7 +84,6 @@ function main() {
   log('\nChecking Electron files...', 'yellow');
   checks.push(checkFile('electron/main.js', 'Main process'));
   checks.push(checkFile('electron/preload.js', 'Preload script'));
-  checks.push(checkFile('electron/tls-manager.js', 'TLS manager'));
   
   // Summary
   log('\n=== Validation Summary ===\n', 'blue');

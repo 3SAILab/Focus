@@ -35,7 +35,7 @@ export default function ContactModal({
         <div className="text-sm text-gray-600 mb-4">扫码联系销售获取更多配额</div>
         <div className="inline-block p-3 bg-white rounded-xl border border-gray-200 shadow-sm">
           <img 
-            src="./sales_wxchat.jpg" 
+            src="./dyf_wxchat.jpg" 
             alt="销售微信二维码" 
             className="w-48 h-48 object-contain"
           />

@@ -108,6 +108,14 @@ export default function DisclaimerModal({
             <p>5. 对于因使用生成内容而产生的任何纠纷，本软件不承担责任。</p>
           </div>
         </div>
+
+        {/* 版权声明 */}
+        <div className="mt-6 pt-4 border-t border-gray-200">
+          <div className="text-xs text-gray-500 text-center space-y-1">
+            <p>© 2025 希革马（宁波市）人工智能有限责任公司 保留所有权利</p>
+            <p>本软件最终解释权归希革马（宁波市）人工智能有限责任公司所有</p>
+          </div>
+        </div>
       </div>
     </Modal>
   );

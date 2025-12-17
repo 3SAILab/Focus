@@ -1,0 +1,13 @@
+{
+    "id": "video_fef76fdb-d90f-4dce-8034-cc4420326cac",
+    "size": "720x1280",
+    "model": "sora-2",
+    "detail": {},
+    "object": "video",
+    "status": "completed",
+    "seconds": "15",
+    "progress": 100,
+    "video_url": "https://midjourney-plus.oss-us-west-1.aliyuncs.com/sora/ef2a4298-1d93-4454-a334-6bbe23970936.mp4",
+    "created_at": 1765285452,
+    "completed_at": 1765285646
+}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ImageIcon } from 'lucide-react';
 import { api } from '../api';
 
@@ -13,6 +14,7 @@ export default function GenerationCounter({
 }: GenerationCounterProps) {
   const [count, setCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadCount();
@@ -32,8 +34,18 @@ export default function GenerationCounter({
     }
   };
 
+  const handleClick = () => {
+    navigate('/history');
+  };
+
   return (
-    <div className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-200 ${className}`}>
+    <div 
+      className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-full border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors ${className}`}
+      onClick={handleClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && handleClick()}
+    >
       <ImageIcon className="w-4 h-4 text-gray-400" />
       <span className="text-sm text-gray-600">
         {loading ? (
