@@ -129,7 +129,7 @@
         "height": 380
       },
       "writeUpdateInfo": false,
-      "format": "ULFO"
+      "format": "UDBZ"
     }
   },
   "dependencies": {

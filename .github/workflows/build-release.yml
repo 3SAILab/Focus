@@ -240,6 +240,7 @@ jobs:
   package-mac:
     needs: [prepare, build-frontend, build-backend-mac]
     runs-on: macos-14
+    timeout-minutes: 60
     strategy:
       matrix:
         sales: ${{ fromJson(needs.prepare.outputs.sales_matrix) }}
@@ -301,6 +302,9 @@ jobs:
           fi
 
       - name: Build Mac DMG (x64)
+        timeout-minutes: 30
+        env:
+          DEBUG: electron-builder
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           SALES_NAME="${{ matrix.sales }}"
@@ -309,11 +313,28 @@ jobs:
           # 使用 x64 后端
           cp dist/backend/sigma-backend-x64 dist/backend/sigma-backend
           
-          npx electron-builder --mac --x64 --publish never \
-            --config.directories.output="release-${SALES_NAME}-mac-x64" \
-            --config.mac.artifactName="$ARTIFACT_NAME"
+          # 重试机制，最多尝试 3 次
+          for i in 1 2 3; do
+            echo "Attempt $i to build Mac x64 DMG..."
+            if npx electron-builder --mac --x64 --publish never \
+              --config.directories.output="release-${SALES_NAME}-mac-x64" \
+              --config.mac.artifactName="$ARTIFACT_NAME"; then
+              echo "Build succeeded on attempt $i"
+              break
+            else
+              echo "Build failed on attempt $i"
+              if [ $i -eq 3 ]; then
+                echo "All attempts failed"
+                exit 1
+              fi
+              sleep 10
+            fi
+          done
 
       - name: Build Mac DMG (arm64)
+        timeout-minutes: 30
+        env:
+          DEBUG: electron-builder
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           SALES_NAME="${{ matrix.sales }}"
@@ -322,9 +343,23 @@ jobs:
           # 使用 arm64 后端
           cp dist/backend/sigma-backend-arm64 dist/backend/sigma-backend
           
-          npx electron-builder --mac --arm64 --publish never \
-            --config.directories.output="release-${SALES_NAME}-mac-arm64" \
-            --config.mac.artifactName="$ARTIFACT_NAME"
+          # 重试机制，最多尝试 3 次
+          for i in 1 2 3; do
+            echo "Attempt $i to build Mac arm64 DMG..."
+            if npx electron-builder --mac --arm64 --publish never \
+              --config.directories.output="release-${SALES_NAME}-mac-arm64" \
+              --config.mac.artifactName="$ARTIFACT_NAME"; then
+              echo "Build succeeded on attempt $i"
+              break
+            else
+              echo "Build failed on attempt $i"
+              if [ $i -eq 3 ]; then
+                echo "All attempts failed"
+                exit 1
+              fi
+              sleep 10
+            fi
+          done
 
       - name: Upload Mac installers
         uses: actions/upload-artifact@v4
@@ -342,7 +377,7 @@ jobs:
   create-release:
     needs: [prepare, package-windows, package-mac]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: always() && startsWith(github.ref, 'refs/tags/') && needs.package-windows.result == 'success'
     steps:
       - name: Download all Windows artifacts
         uses: actions/download-artifact@v4
@@ -353,10 +388,18 @@ jobs:
 
       - name: Download all Mac artifacts
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           pattern: mac-*
           path: release-all/
           merge-multiple: true
+
+      - name: Flatten Mac artifacts
+        run: |
+          # 将子目录中的 DMG 文件移动到根目录
+          find release-all -name "*.dmg" -exec mv {} release-all/ \; 2>/dev/null || true
+          # 删除空的子目录
+          find release-all -type d -empty -delete 2>/dev/null || true
 
       - name: List all artifacts
         run: |
@@ -406,6 +449,13 @@ jobs:
           pattern: mac-*
           path: release-all-sales/
           merge-multiple: true
+
+      - name: Flatten Mac artifacts
+        run: |
+          # 将子目录中的 DMG 文件移动到根目录
+          find release-all-sales -name "*.dmg" -exec mv {} release-all-sales/ \; 2>/dev/null || true
+          # 删除空的子目录
+          find release-all-sales -type d -empty -delete 2>/dev/null || true
 
       - name: List all artifacts
         run: |
