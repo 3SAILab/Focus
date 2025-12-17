@@ -81,10 +81,9 @@
       ],
       "icon": "assets/icon.icns",
       "category": "public.app-category.graphics-design",
-      "hardenedRuntime": true,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist",
+      "identity": null,
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "linux": {

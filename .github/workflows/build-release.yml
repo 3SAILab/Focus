@@ -1,0 +1,424 @@
+name: Build and Release
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      sales_list:
+        description: '销售列表 (逗号分隔，留空则打包所有)'
+        required: false
+        default: ''
+      version:
+        description: '版本号 (留空使用 package.json 中的版本)'
+        required: false
+        default: ''
+  # 推送 tag 时自动触发
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+
+jobs:
+  # ============================================================================
+  # 准备工作：获取销售列表和版本信息
+  # ============================================================================
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sales_matrix: ${{ steps.get-sales.outputs.matrix }}
+      version: ${{ steps.get-version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get sales list
+        id: get-sales
+        run: |
+          if [ -n "${{ github.event.inputs.sales_list }}" ]; then
+            # 使用手动输入的销售列表
+            SALES="${{ github.event.inputs.sales_list }}"
+            SALES_ARRAY=$(echo $SALES | tr ',' '\n' | jq -R . | jq -s .)
+          else
+            # 自动扫描 frontend/public 中的 *_wxchat.jpg 文件
+            SALES_ARRAY=$(ls frontend/public/*_wxchat.jpg 2>/dev/null | xargs -I {} basename {} | sed 's/_wxchat\.jpg//' | jq -R . | jq -s .)
+          fi
+          echo "matrix=$SALES_ARRAY" >> $GITHUB_OUTPUT
+          echo "Found sales: $SALES_ARRAY"
+
+      - name: Get version
+        id: get-version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+  # ============================================================================
+  # 构建前端（只需构建一次）
+  # ============================================================================
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Build frontend
+        run: npm run build:frontend
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  # ============================================================================
+  # 构建 Windows 后端
+  # ============================================================================
+  build-backend-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Build Windows backend (x64)
+        run: |
+          cd backend
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -o ../dist/backend/sigma-backend.exe .
+
+      - name: Upload Windows backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-windows
+          path: dist/backend/sigma-backend.exe
+          retention-days: 1
+
+  # ============================================================================
+  # 构建 Mac 后端
+  # ============================================================================
+  build-backend-mac:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Build Mac backend (x64)
+        run: |
+          cd backend
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w -buildid=" -o ../dist/backend/sigma-backend-x64 .
+
+      - name: Build Mac backend (arm64)
+        run: |
+          cd backend
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -buildid=" -o ../dist/backend/sigma-backend-arm64 .
+
+      - name: Upload Mac backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-mac
+          path: |
+            dist/backend/sigma-backend-x64
+            dist/backend/sigma-backend-arm64
+          retention-days: 1
+
+
+  # ============================================================================
+  # 打包 Windows 版本（为每个销售）
+  # ============================================================================
+  package-windows:
+    needs: [prepare, build-frontend, build-backend-windows]
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        sales: ${{ fromJson(needs.prepare.outputs.sales_matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+      - name: Download Windows backend
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-windows
+          path: dist/backend/
+
+      - name: Prepare sales QR image
+        run: |
+          $salesName = "${{ matrix.sales }}"
+          $sourcePath = "frontend/public/${salesName}_wxchat.jpg"
+          $destPath = "frontend/dist/sales_wxchat.jpg"
+          
+          if (Test-Path $sourcePath) {
+            Copy-Item $sourcePath $destPath
+            Write-Host "Copied QR image for sales: $salesName"
+          } else {
+            # Try PNG
+            $sourcePath = "frontend/public/${salesName}_wxchat.png"
+            if (Test-Path $sourcePath) {
+              Copy-Item $sourcePath $destPath
+              Write-Host "Copied QR image (PNG) for sales: $salesName"
+            } else {
+              Write-Error "QR image not found for sales: $salesName"
+              exit 1
+            }
+          }
+        shell: pwsh
+
+      - name: Build Windows installer
+        run: |
+          $version = "${{ needs.prepare.outputs.version }}"
+          $salesName = "${{ matrix.sales }}"
+          $artifactName = "Focus-${version}-${salesName}.exe"
+          
+          npx electron-builder --win --x64 --ia32 `
+            --config.directories.output="release-$salesName" `
+            --config.win.artifactName="$artifactName"
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.sales }}
+          path: release-${{ matrix.sales }}/*.exe
+          retention-days: 7
+
+  # ============================================================================
+  # 打包 Mac 版本（为每个销售）
+  # ============================================================================
+  package-mac:
+    needs: [prepare, build-frontend, build-backend-mac]
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        sales: ${{ fromJson(needs.prepare.outputs.sales_matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+      - name: Download Mac backend
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-mac
+          path: dist/backend/
+
+      - name: Prepare backend for packaging
+        run: |
+          # 根据架构选择正确的后端
+          # electron-builder 会自动处理多架构
+          chmod +x dist/backend/sigma-backend-x64
+          chmod +x dist/backend/sigma-backend-arm64
+          
+          # 创建通用后端（用于 x64 打包）
+          cp dist/backend/sigma-backend-x64 dist/backend/sigma-backend
+
+      - name: Prepare sales QR image
+        run: |
+          SALES_NAME="${{ matrix.sales }}"
+          SOURCE_PATH="frontend/public/${SALES_NAME}_wxchat.jpg"
+          DEST_PATH="frontend/dist/sales_wxchat.jpg"
+          
+          if [ -f "$SOURCE_PATH" ]; then
+            cp "$SOURCE_PATH" "$DEST_PATH"
+            echo "Copied QR image for sales: $SALES_NAME"
+          else
+            # Try PNG
+            SOURCE_PATH="frontend/public/${SALES_NAME}_wxchat.png"
+            if [ -f "$SOURCE_PATH" ]; then
+              cp "$SOURCE_PATH" "$DEST_PATH"
+              echo "Copied QR image (PNG) for sales: $SALES_NAME"
+            else
+              echo "Error: QR image not found for sales: $SALES_NAME"
+              exit 1
+            fi
+          fi
+
+      - name: Build Mac DMG (x64)
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          SALES_NAME="${{ matrix.sales }}"
+          ARTIFACT_NAME="Focus-${VERSION}-${SALES_NAME}-mac-x64.dmg"
+          
+          # 使用 x64 后端
+          cp dist/backend/sigma-backend-x64 dist/backend/sigma-backend
+          
+          npx electron-builder --mac --x64 \
+            --config.directories.output="release-${SALES_NAME}-mac-x64" \
+            --config.mac.artifactName="$ARTIFACT_NAME"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Mac DMG (arm64)
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          SALES_NAME="${{ matrix.sales }}"
+          ARTIFACT_NAME="Focus-${VERSION}-${SALES_NAME}-mac-arm64.dmg"
+          
+          # 使用 arm64 后端
+          cp dist/backend/sigma-backend-arm64 dist/backend/sigma-backend
+          
+          npx electron-builder --mac --arm64 \
+            --config.directories.output="release-${SALES_NAME}-mac-arm64" \
+            --config.mac.artifactName="$ARTIFACT_NAME"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Mac installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.sales }}
+          path: |
+            release-${{ matrix.sales }}-mac-x64/*.dmg
+            release-${{ matrix.sales }}-mac-arm64/*.dmg
+          retention-days: 7
+
+
+  # ============================================================================
+  # 收集所有安装包并创建 Release
+  # ============================================================================
+  create-release:
+    needs: [prepare, package-windows, package-mac]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-*
+          path: release-all/
+          merge-multiple: true
+
+      - name: Download all Mac artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mac-*
+          path: release-all/
+          merge-multiple: true
+
+      - name: List all artifacts
+        run: |
+          echo "=== All release artifacts ==="
+          ls -la release-all/
+          echo "=== Total size ==="
+          du -sh release-all/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Focus v${{ needs.prepare.outputs.version }}
+          body: |
+            ## Focus v${{ needs.prepare.outputs.version }}
+            
+            ### 下载说明
+            - Windows 用户：下载对应销售名的 `.exe` 文件
+            - Mac Intel 用户：下载 `*-mac-x64.dmg` 文件
+            - Mac Apple Silicon (M1/M2/M3) 用户：下载 `*-mac-arm64.dmg` 文件
+            
+            ### 安装包列表
+            请根据您的销售代表选择对应的安装包。
+          files: release-all/*
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================================
+  # 手动触发时：上传到统一的 artifact
+  # ============================================================================
+  collect-artifacts:
+    needs: [prepare, package-windows, package-mac]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Download all Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-*
+          path: release-all-sales/
+          merge-multiple: true
+
+      - name: Download all Mac artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mac-*
+          path: release-all-sales/
+          merge-multiple: true
+
+      - name: List all artifacts
+        run: |
+          echo "=== All release artifacts ==="
+          ls -la release-all-sales/
+          echo "=== Total size ==="
+          du -sh release-all-sales/
+
+      - name: Upload combined release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-all-sales-v${{ needs.prepare.outputs.version }}
+          path: release-all-sales/
+          retention-days: 30

@@ -1,0 +1,163 @@
+name: Build Single Sales Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      sales_name:
+        description: '销售名称 (如 dyf, lyq 等)'
+        required: true
+        type: string
+      platforms:
+        description: '目标平台'
+        required: true
+        type: choice
+        options:
+          - 'all'
+          - 'windows'
+          - 'mac'
+        default: 'all'
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            backend_ext: .exe
+          - os: macos-latest
+            platform: mac
+            backend_ext: ''
+      fail-fast: false
+
+    steps:
+      - name: Check platform filter
+        id: check-platform
+        run: |
+          if [ "${{ github.event.inputs.platforms }}" = "all" ] || [ "${{ github.event.inputs.platforms }}" = "${{ matrix.platform }}" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Checkout code
+        if: steps.check-platform.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.check-platform.outputs.should_run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Go
+        if: steps.check-platform.outputs.should_run == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Install dependencies
+        if: steps.check-platform.outputs.should_run == 'true'
+        run: |
+          npm ci
+          cd frontend && npm ci
+
+      - name: Build frontend
+        if: steps.check-platform.outputs.should_run == 'true'
+        run: npm run build:frontend
+
+      - name: Build backend (Windows)
+        if: steps.check-platform.outputs.should_run == 'true' && matrix.platform == 'windows'
+        run: |
+          cd backend
+          go build -trimpath -ldflags="-s -w -buildid=" -o ../dist/backend/sigma-backend.exe .
+        shell: bash
+
+      - name: Build backend (Mac)
+        if: steps.check-platform.outputs.should_run == 'true' && matrix.platform == 'mac'
+        run: |
+          cd backend
+          go build -trimpath -ldflags="-s -w -buildid=" -o ../dist/backend/sigma-backend .
+          chmod +x ../dist/backend/sigma-backend
+
+      - name: Prepare sales QR image
+        if: steps.check-platform.outputs.should_run == 'true'
+        run: |
+          SALES_NAME="${{ github.event.inputs.sales_name }}"
+          SOURCE_JPG="frontend/public/${SALES_NAME}_wxchat.jpg"
+          SOURCE_PNG="frontend/public/${SALES_NAME}_wxchat.png"
+          DEST="frontend/dist/sales_wxchat.jpg"
+          
+          if [ -f "$SOURCE_JPG" ]; then
+            cp "$SOURCE_JPG" "$DEST"
+            echo "Copied QR image for sales: $SALES_NAME"
+          elif [ -f "$SOURCE_PNG" ]; then
+            cp "$SOURCE_PNG" "$DEST"
+            echo "Copied QR image (PNG) for sales: $SALES_NAME"
+          else
+            echo "Error: QR image not found for sales: $SALES_NAME"
+            echo "Available files:"
+            ls -la frontend/public/*_wxchat.* || echo "No wxchat files found"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Get version
+        if: steps.check-platform.outputs.should_run == 'true'
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Build Windows installer
+        if: steps.check-platform.outputs.should_run == 'true' && matrix.platform == 'windows'
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $salesName = "${{ github.event.inputs.sales_name }}"
+          $artifactName = "Focus-${version}-${salesName}.exe"
+          
+          npx electron-builder --win --x64 --ia32 `
+            --config.directories.output="release" `
+            --config.win.artifactName="$artifactName"
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Mac installer
+        if: steps.check-platform.outputs.should_run == 'true' && matrix.platform == 'mac'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SALES_NAME="${{ github.event.inputs.sales_name }}"
+          
+          # Build for current architecture
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then
+            ARTIFACT_NAME="Focus-${VERSION}-${SALES_NAME}-mac-arm64.dmg"
+            npx electron-builder --mac --arm64 \
+              --config.directories.output="release" \
+              --config.mac.artifactName="$ARTIFACT_NAME"
+          else
+            ARTIFACT_NAME="Focus-${VERSION}-${SALES_NAME}-mac-x64.dmg"
+            npx electron-builder --mac --x64 \
+              --config.directories.output="release" \
+              --config.mac.artifactName="$ARTIFACT_NAME"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact
+        if: steps.check-platform.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Focus-${{ steps.version.outputs.version }}-${{ github.event.inputs.sales_name }}-${{ matrix.platform }}
+          path: |
+            release/*.exe
+            release/*.dmg
+          retention-days: 7
