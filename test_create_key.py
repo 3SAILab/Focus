@@ -7,7 +7,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # -------------------------- 配置项 --------------------------
-QUOTA = 1.75  # 配额值
+QUOTA = 4.05  # 配额值
 CREATE_COUNT = 400  # 要创建的令牌数量
 API_DOMAIN = "api.vectorengine.ai"
 API_PATH = "/api/token/"
@@ -57,7 +57,7 @@ def get_payload(quota, n):
         "unlimited_quota": False,
         "model_limits_enabled": False,
         "model_limits": "",
-        "group": "限时特价,default",
+        "group": "限时特价,优质gemini",
         "mj_image_mode": "default",
         "mj_custom_proxy": "",
         "selected_groups": [],

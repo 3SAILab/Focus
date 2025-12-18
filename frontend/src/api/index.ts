@@ -305,10 +305,10 @@ export const api = {
     }
   },
 
-  // 获取历史记录
-  async getHistory(): Promise<Response> {
+  // 获取历史记录（支持分页）
+  async getHistory(page: number = 1, pageSize: number = 20): Promise<Response> {
     const baseUrl = await getCachedApiUrl();
-    return fetch(`${baseUrl}/history`, {
+    return fetch(`${baseUrl}/history?page=${page}&page_size=${pageSize}`, {
       method: 'GET',
     });
   },

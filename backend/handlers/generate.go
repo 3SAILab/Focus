@@ -98,7 +98,8 @@ func GenerateHandler(c *gin.Context) {
 			refFileName := fmt.Sprintf("ref_%d_%s", time.Now().UnixNano(), file.Filename)
 			refFilePath := filepath.Join(config.UploadDir, refFileName)
 			if err := c.SaveUploadedFile(file, refFilePath); err == nil {
-				savedRefImages = append(savedRefImages, fmt.Sprintf("%s/uploads/%s", utils.GetBaseURL(config.ServerPort), refFileName))
+				// 存储相对路径，读取时动态拼接当前端口
+				savedRefImages = append(savedRefImages, fmt.Sprintf("uploads/%s", refFileName))
 			}
 		}
 	}
@@ -133,11 +134,17 @@ func GenerateHandler(c *gin.Context) {
 // generateSingleImage 生成单张图片 - 异步模式
 // 立即返回 task_id，在后台 goroutine 中处理 AI 请求
 func generateSingleImage(c *gin.Context, currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, savedRefImages []string, refImagesJSON []byte, taskID string, task *models.GenerationTask) {
+	// 转换相对路径为完整 URL 返回给前端
+	absoluteRefImages := make([]string, len(savedRefImages))
+	for i, ref := range savedRefImages {
+		absoluteRefImages[i] = utils.ToAbsoluteURL(ref, config.ServerPort)
+	}
+	
 	// 立即返回 task_id，让前端可以开始轮询
 	c.JSON(200, gin.H{
 		"status":     "processing",
 		"task_id":    taskID,
-		"ref_images": savedRefImages,
+		"ref_images": absoluteRefImages,
 	})
 	
 	// 在后台 goroutine 中处理 AI 请求
@@ -252,11 +259,13 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 				savePath := filepath.Join(config.OutputDir, fileName)
 				os.WriteFile(savePath, imgData, 0644)
 
-				finalImageURL = fmt.Sprintf("%s/images/%s", utils.GetBaseURL(config.ServerPort), fileName)
+				// 存储相对路径，读取时动态拼接当前端口
+				relativeImageURL := fmt.Sprintf("images/%s", fileName)
+				finalImageURL = fmt.Sprintf("%s/%s", utils.GetBaseURL(config.ServerPort), relativeImageURL)
 
 				newRecord := models.GenerationHistory{
 					Prompt:    prompt,
-					ImageURL:  finalImageURL,
+					ImageURL:  relativeImageURL, // 存储相对路径
 					FileName:  fileName,
 					RefImages: string(refImagesJSON),
 					Type:      generationType,
@@ -306,6 +315,12 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 	// 生成批次 ID
 	batchID := uuid.New().String()
 	
+	// 转换相对路径为完整 URL 返回给前端
+	absoluteRefImages := make([]string, len(savedRefImages))
+	for i, ref := range savedRefImages {
+		absoluteRefImages[i] = utils.ToAbsoluteURL(ref, config.ServerPort)
+	}
+	
 	// 设置 SSE 响应头
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -319,7 +334,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 		"batch_id":   batchID,
 		"count":      count,
 		"prompt":     prompt,
-		"ref_images": savedRefImages,
+		"ref_images": absoluteRefImages,
 	}
 	initialJSON, _ := json.Marshal(initialData)
 	c.SSEvent("message", string(initialJSON))
@@ -404,10 +419,12 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 				"total":     count,
 			}
 		} else {
+			// 转换相对路径为完整 URL 返回给前端
+			absoluteImageURL := utils.ToAbsoluteURL(result.ImageURL, config.ServerPort)
 			eventData = gin.H{
 				"type":      "image",
 				"index":     result.Index,
-				"image_url": result.ImageURL,
+				"image_url": absoluteImageURL,
 				"completed": completedCount,
 				"total":     count,
 			}
@@ -430,8 +447,10 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 				"index": result.Index,
 			}
 		} else {
+			// 转换相对路径为完整 URL 返回给前端
+			absoluteImageURL := utils.ToAbsoluteURL(result.ImageURL, config.ServerPort)
 			images[i] = gin.H{
-				"image_url": result.ImageURL,
+				"image_url": absoluteImageURL,
 				"index":     result.Index,
 			}
 		}
@@ -468,7 +487,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 		"task_id":       taskID,
 		"batch_id":      batchID,
 		"images":        images,
-		"ref_images":    savedRefImages,
+		"ref_images":    absoluteRefImages,
 		"success_count": successCount,
 		"total_count":   count,
 	}
@@ -555,8 +574,9 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 				savePath := filepath.Join(config.OutputDir, fileName)
 				os.WriteFile(savePath, imgData, 0644)
 				
-				imageURL := fmt.Sprintf("%s/images/%s", utils.GetBaseURL(config.ServerPort), fileName)
-				return ImageResult{ImageURL: imageURL, Index: index}
+				// 存储相对路径，读取时动态拼接当前端口
+				relativeImageURL := fmt.Sprintf("images/%s", fileName)
+				return ImageResult{ImageURL: relativeImageURL, Index: index}
 			}
 		}
 	}

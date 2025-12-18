@@ -34,7 +34,7 @@
   ; Only remove application files, not user data
   
   ; Show message to user about data preservation
-  MessageBox MB_YESNO|MB_ICONQUESTION "Do you want to keep user data (generated images, history, etc.)?$\r$\n$\r$\nClick Yes to keep data, No to delete all data." IDYES KeepData
+  MessageBox MB_YESNO|MB_ICONQUESTION "是否保留用户数据（生成的图片、历史记录等）？$\r$\n$\r$\n点击[是]保留数据，点击[否]删除所有数据。" IDYES KeepData
   
   ; User chose No - delete data
   RMDir /r "$INSTDIR\data"

@@ -109,7 +109,9 @@
       "installerHeaderIcon": "assets/focus.ico",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
-      "include": "build/installer.nsh"
+      "include": "build/installer.nsh",
+      "language": "2052",
+      "installerLanguages": ["zh_CN"]
     },
     "dmg": {
       "contents": [

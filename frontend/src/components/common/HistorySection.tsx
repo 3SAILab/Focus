@@ -64,8 +64,8 @@ export default function HistorySection({
           {/* 恢复的处理中任务占位卡片 - 显示在最前面 */}
           {processingTasks.map((task) => (
             <div key={task.task_id} className="flex-shrink-0 w-32">
-              <div className="aspect-square">
-                <PlaceholderCard />
+              <div className="aspect-square rounded-lg overflow-hidden">
+                <PlaceholderCard showFooter={false} />
               </div>
             </div>
           ))}

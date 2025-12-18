@@ -5,9 +5,54 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"sigma/models"
 	"sigma/config"
+	"sigma/models"
+	"sigma/utils"
 )
+
+// convertHistoryToResponse 将历史记录转换为响应格式，同时转换 URL
+func convertHistoryToResponse(history []models.GenerationHistory) []models.GenerationHistoryResponse {
+	response := make([]models.GenerationHistoryResponse, len(history))
+	for i, h := range history {
+		// 转换 URL 为当前端口的绝对路径（兼容旧数据和新数据）
+		imageURL := utils.ToAbsoluteURL(h.ImageURL, config.ServerPort)
+		refImages := utils.ConvertRefImagesJSON(h.RefImages, config.ServerPort, false)
+		
+		response[i] = models.GenerationHistoryResponse{
+			ID:             h.ID,
+			Prompt:         h.Prompt,
+			OriginalPrompt: h.OriginalPrompt,
+			ImageURL:       imageURL,
+			FileName:       h.FileName,
+			RefImages:      refImages,
+			Type:           h.Type,
+			CreatedAt:      h.CreatedAt,
+			UpdatedAt:      h.UpdatedAt,
+			BatchID:        h.BatchID,
+			BatchIndex:     h.BatchIndex,
+			BatchTotal:     h.BatchTotal,
+		}
+	}
+	return response
+}
+
+// parsePageParams 解析分页参数
+func parsePageParams(c *gin.Context) (int, int) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "100"))
+	switch {
+	case pageSize > 10000:
+		pageSize = 10000 // 最大允许 10000 条
+	case pageSize <= 0:
+		pageSize = 100 // 默认 100 条
+	}
+
+	return page, pageSize
+}
 
 // HistoryHandler 获取历史记录处理函数
 func HistoryHandler(c *gin.Context) {
@@ -30,19 +75,7 @@ func HistoryHandler(c *gin.Context) {
 		query = query.Where("type = ?", typeFilter)
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 {
-		page = 1
-	}
-
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	switch {
-	case pageSize > 100:
-		pageSize = 100
-	case pageSize <= 0:
-		pageSize = 20
-	}
-
+	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
 
 	result := query.Order("created_at desc").
@@ -55,26 +88,9 @@ func HistoryHandler(c *gin.Context) {
 		return
 	}
 
-	response := make([]models.GenerationHistoryResponse, len(history))
-	for i, h := range history {
-		response[i] = models.GenerationHistoryResponse{
-			ID:             h.ID,
-			Prompt:         h.Prompt,
-			OriginalPrompt: h.OriginalPrompt,
-			ImageURL:       h.ImageURL,
-			FileName:       h.FileName,
-			RefImages:      h.RefImages,
-			Type:           h.Type,
-			CreatedAt:      h.CreatedAt,
-			UpdatedAt:      h.UpdatedAt,
-			BatchID:        h.BatchID,
-			BatchIndex:     h.BatchIndex,
-			BatchTotal:     h.BatchTotal,
-		}
-	}
-
-	c.JSON(200, response)
+	c.JSON(200, convertHistoryToResponse(history))
 }
+
 
 // WhiteBackgroundHistoryHandler 获取白底图历史记录
 func WhiteBackgroundHistoryHandler(c *gin.Context) {
@@ -82,19 +98,7 @@ func WhiteBackgroundHistoryHandler(c *gin.Context) {
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("type = ?", models.GenerationTypeWhiteBackground)
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 {
-		page = 1
-	}
-
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	switch {
-	case pageSize > 100:
-		pageSize = 100
-	case pageSize <= 0:
-		pageSize = 20
-	}
-
+	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
 
 	result := query.Order("created_at desc").
@@ -107,28 +111,8 @@ func WhiteBackgroundHistoryHandler(c *gin.Context) {
 		return
 	}
 
-	response := make([]models.GenerationHistoryResponse, len(history))
-	for i, h := range history {
-		response[i] = models.GenerationHistoryResponse{
-			ID:             h.ID,
-			Prompt:         h.Prompt,
-			OriginalPrompt: h.OriginalPrompt,
-			ImageURL:       h.ImageURL,
-			FileName:       h.FileName,
-			RefImages:      h.RefImages,
-			Type:           h.Type,
-			CreatedAt:      h.CreatedAt,
-			UpdatedAt:      h.UpdatedAt,
-			BatchID:        h.BatchID,
-			BatchIndex:     h.BatchIndex,
-			BatchTotal:     h.BatchTotal,
-		}
-	}
-
-	c.JSON(200, response)
+	c.JSON(200, convertHistoryToResponse(history))
 }
-
-
 
 // ClothingChangeHistoryHandler 获取换装历史记录
 func ClothingChangeHistoryHandler(c *gin.Context) {
@@ -136,19 +120,7 @@ func ClothingChangeHistoryHandler(c *gin.Context) {
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("type = ?", models.GenerationTypeClothingChange)
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 {
-		page = 1
-	}
-
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	switch {
-	case pageSize > 100:
-		pageSize = 100
-	case pageSize <= 0:
-		pageSize = 20
-	}
-
+	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
 
 	result := query.Order("created_at desc").
@@ -161,27 +133,8 @@ func ClothingChangeHistoryHandler(c *gin.Context) {
 		return
 	}
 
-	response := make([]models.GenerationHistoryResponse, len(history))
-	for i, h := range history {
-		response[i] = models.GenerationHistoryResponse{
-			ID:             h.ID,
-			Prompt:         h.Prompt,
-			OriginalPrompt: h.OriginalPrompt,
-			ImageURL:       h.ImageURL,
-			FileName:       h.FileName,
-			RefImages:      h.RefImages,
-			Type:           h.Type,
-			CreatedAt:      h.CreatedAt,
-			UpdatedAt:      h.UpdatedAt,
-			BatchID:        h.BatchID,
-			BatchIndex:     h.BatchIndex,
-			BatchTotal:     h.BatchTotal,
-		}
-	}
-
-	c.JSON(200, response)
+	c.JSON(200, convertHistoryToResponse(history))
 }
-
 
 // ProductSceneHistoryHandler 获取一键商品图历史记录
 func ProductSceneHistoryHandler(c *gin.Context) {
@@ -189,19 +142,7 @@ func ProductSceneHistoryHandler(c *gin.Context) {
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("type = ?", models.GenerationTypeProductScene)
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 {
-		page = 1
-	}
-
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	switch {
-	case pageSize > 100:
-		pageSize = 100
-	case pageSize <= 0:
-		pageSize = 20
-	}
-
+	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
 
 	result := query.Order("created_at desc").
@@ -214,25 +155,7 @@ func ProductSceneHistoryHandler(c *gin.Context) {
 		return
 	}
 
-	response := make([]models.GenerationHistoryResponse, len(history))
-	for i, h := range history {
-		response[i] = models.GenerationHistoryResponse{
-			ID:             h.ID,
-			Prompt:         h.Prompt,
-			OriginalPrompt: h.OriginalPrompt,
-			ImageURL:       h.ImageURL,
-			FileName:       h.FileName,
-			RefImages:      h.RefImages,
-			Type:           h.Type,
-			CreatedAt:      h.CreatedAt,
-			UpdatedAt:      h.UpdatedAt,
-			BatchID:        h.BatchID,
-			BatchIndex:     h.BatchIndex,
-			BatchTotal:     h.BatchTotal,
-		}
-	}
-
-	c.JSON(200, response)
+	c.JSON(200, convertHistoryToResponse(history))
 }
 
 // LightShadowHistoryHandler 获取光影融合历史记录
@@ -241,19 +164,7 @@ func LightShadowHistoryHandler(c *gin.Context) {
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("type = ?", models.GenerationTypeLightShadow)
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 {
-		page = 1
-	}
-
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	switch {
-	case pageSize > 100:
-		pageSize = 100
-	case pageSize <= 0:
-		pageSize = 20
-	}
-
+	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
 
 	result := query.Order("created_at desc").
@@ -266,23 +177,5 @@ func LightShadowHistoryHandler(c *gin.Context) {
 		return
 	}
 
-	response := make([]models.GenerationHistoryResponse, len(history))
-	for i, h := range history {
-		response[i] = models.GenerationHistoryResponse{
-			ID:             h.ID,
-			Prompt:         h.Prompt,
-			OriginalPrompt: h.OriginalPrompt,
-			ImageURL:       h.ImageURL,
-			FileName:       h.FileName,
-			RefImages:      h.RefImages,
-			Type:           h.Type,
-			CreatedAt:      h.CreatedAt,
-			UpdatedAt:      h.UpdatedAt,
-			BatchID:        h.BatchID,
-			BatchIndex:     h.BatchIndex,
-			BatchTotal:     h.BatchTotal,
-		}
-	}
-
-	c.JSON(200, response)
+	c.JSON(200, convertHistoryToResponse(history))
 }

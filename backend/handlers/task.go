@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"sigma/config"
 	"sigma/models"
+	"sigma/utils"
 )
 
 // TaskTimeoutDuration 任务超时时间（5分钟）
@@ -31,10 +32,14 @@ func GetProcessingTasks(c *gin.Context) {
 		return
 	}
 	
-	// 转换为响应格式
+	// 转换为响应格式，同时转换 URL
 	response := make([]models.TaskResponse, len(tasks))
 	for i, task := range tasks {
-		response[i] = task.ToResponse()
+		resp := task.ToResponse()
+		// 转换 URL 为当前端口的绝对路径（兼容旧数据和新数据）
+		resp.ImageURL = utils.ToAbsoluteURL(resp.ImageURL, config.ServerPort)
+		resp.RefImages = utils.ConvertRefImagesJSON(resp.RefImages, config.ServerPort, false)
+		response[i] = resp
 	}
 	
 	c.JSON(200, response)
@@ -56,7 +61,12 @@ func GetTaskStatus(c *gin.Context) {
 		return
 	}
 	
-	c.JSON(200, task.ToResponse())
+	// 转换 URL 为当前端口的绝对路径（兼容旧数据和新数据）
+	resp := task.ToResponse()
+	resp.ImageURL = utils.ToAbsoluteURL(resp.ImageURL, config.ServerPort)
+	resp.RefImages = utils.ConvertRefImagesJSON(resp.RefImages, config.ServerPort, false)
+	
+	c.JSON(200, resp)
 }
 
 // CleanupStaleTasks 清理超时的任务

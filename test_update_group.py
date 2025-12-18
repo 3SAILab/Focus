@@ -13,10 +13,10 @@ HEADERS_BASE = {
     'Authorization': 'SxpO4tsw05gn5icEKyBb4iSKfE/Y3TEj',
     'content-type': 'application/json'
 }
-EXCEL_READ_PATH = "令牌列表.xlsx"  # 读取的Excel文件路径
+EXCEL_READ_PATH = r"E:\PythonProject\sigma\20251217_令牌列表_400.xlsx"  # 读取的Excel文件路径
 
 # ⚠️ 并发设置
-MAX_WORKERS = 5  # 建议设置 5-10，设置过高容易触发 API 的 429 限流
+MAX_WORKERS = 10  # 建议设置 5-10，设置过高容易触发 API 的 429 限流
 
 # -------------------------- 核心功能函数 --------------------------
 

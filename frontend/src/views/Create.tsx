@@ -5,7 +5,6 @@ import { ChevronDown, RotateCw, Pencil } from 'lucide-react';
 import Lightbox from '../components/Lightbox';
 import ImageCard from '../components/ImageCard';
 import ImageGrid from '../components/ImageGrid';
-import PlaceholderCard from '../components/PlaceholderCard';
 import ErrorCard from '../components/ErrorCard';
 import PromptBar from '../components/PromptBar';
 import { PageHeader, QuotaErrorHandler } from '../components/common';
@@ -34,6 +33,7 @@ interface BatchResult {
   prompt: string;
   timestamp: number;
   imageCount: number; // 记录请求的图片数量
+  refImages?: string[]; // 参考图 URL 列表
 }
 
 export default function Create() {
@@ -64,7 +64,14 @@ export default function Create() {
   // SSE 流式生成状态
   const [streamingBatch, setStreamingBatch] = useState<BatchResult | null>(null);
   
+  // 分页状态
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const PAGE_SIZE = 20;
+  
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null); // 顶部哨兵元素，用于检测滚动到顶部
   
   // 计算任务运行状态（用于禁用重新生成按钮）
   // 注意：processingTasks 在 useTaskRecovery 之后才可用，这里先定义为 false，后面会更新
@@ -77,9 +84,10 @@ export default function Create() {
     }
   };
 
+  // 加载历史记录（首次加载或刷新）
   const loadHistory = useCallback(async () => {
     try {
-      const response = await api.getHistory();
+      const response = await api.getHistory(1, PAGE_SIZE);
       if (response.ok) {
         const data: GenerationHistory[] = await response.json();
         // 过滤掉白底图和换装的历史记录，只显示创作空间的
@@ -87,6 +95,8 @@ export default function Create() {
           (item) => !item.type || item.type === GenerationType.CREATE
         );
         setHistory(filteredData);
+        setCurrentPage(1);
+        setHasMore(data.length >= PAGE_SIZE); // 如果返回数量等于 PAGE_SIZE，可能还有更多
         
         // 清空 batchResults，因为历史记录已经包含了所有数据
         // 避免重复显示
@@ -97,15 +107,80 @@ export default function Create() {
     }
   }, []);
 
+  // 加载更多历史记录（向上滚动时触发）
+  const loadMoreHistory = useCallback(async () => {
+    if (isLoadingMore || !hasMore) return;
+    
+    setIsLoadingMore(true);
+    
+    // 记录当前滚动位置，用于加载后恢复
+    const container = scrollContainerRef.current;
+    const prevScrollTop = container?.scrollTop || 0;
+    const prevScrollHeight = container?.scrollHeight || 0;
+    
+    // 禁用平滑滚动，确保位置恢复是瞬间的
+    if (container) {
+      container.style.scrollBehavior = 'auto';
+    }
+    
+    try {
+      const nextPage = currentPage + 1;
+      const response = await api.getHistory(nextPage, PAGE_SIZE);
+      if (response.ok) {
+        const data: GenerationHistory[] = await response.json();
+        // 过滤掉白底图和换装的历史记录
+        const filteredData = data.filter(
+          (item) => !item.type || item.type === GenerationType.CREATE
+        );
+        
+        if (filteredData.length > 0) {
+          // 后端返回的是 desc 排序（最新在前），我们需要把更旧的数据追加到 history 末尾
+          // history 存储顺序：[最新, ..., 较旧] (desc)
+          // 新加载的数据也是 desc 排序，直接追加到末尾即可
+          setHistory(prev => [...prev, ...filteredData]);
+          setCurrentPage(nextPage);
+        }
+        
+        // 如果返回数量小于 PAGE_SIZE，说明没有更多数据了
+        setHasMore(data.length >= PAGE_SIZE);
+      }
+    } catch (error) {
+      console.error('加载更多历史记录失败:', error);
+    } finally {
+      setIsLoadingMore(false);
+      
+      // 恢复滚动位置：新内容加在数组末尾，显示时 reverse 后出现在顶部
+      // 需要调整滚动位置，让用户看到的内容保持不变
+      // 使用 requestAnimationFrame 确保 DOM 已更新
+      requestAnimationFrame(() => {
+        if (container) {
+          const newScrollHeight = container.scrollHeight;
+          const heightDiff = newScrollHeight - prevScrollHeight;
+          // 新内容在顶部，所以需要把滚动位置下移（瞬间完成）
+          container.scrollTop = prevScrollTop + heightDiff;
+          
+          // 恢复平滑滚动（延迟一点，确保位置已设置）
+          setTimeout(() => {
+            if (container) {
+              container.style.scrollBehavior = '';
+            }
+          }, 100);
+        }
+      });
+    }
+  }, [currentPage, hasMore, isLoadingMore]);
+
   // Task recovery callbacks
   const handleTaskComplete = useCallback((task: GenerationTask) => {
     console.log('[Create] Task completed:', task.task_id);
+    // 清空当前会话的批次结果，避免与历史记录重复显示
+    setBatchResults([]);
     // Reload history to show the completed task
     loadHistory();
     // Refresh generation counter
     setCounterRefresh(prev => prev + 1);
-    toast.success('图片生成完成');
-  }, [loadHistory, toast]);
+    // 注意：GlobalTaskContext 已经显示了 toast，这里不再重复显示
+  }, [loadHistory]);
 
   const handleTaskFailed = useCallback((task: GenerationTask) => {
     console.log('[Create] Task failed:', task.task_id, task.error_msg);
@@ -193,6 +268,8 @@ export default function Create() {
         setIsGenerating(false);
         setGeneratingId(null);
         setCurrentTaskId(null);
+        // 清空当前会话的批次结果，避免与历史记录重复显示
+        setBatchResults([]);
         // 重新加载历史记录
         loadHistory();
         // 刷新计数器
@@ -259,50 +336,49 @@ export default function Create() {
     loadHistory();
   }, []);
 
-  // 核心滚动逻辑：首次加载直接跳到底部，后续更新平滑滚动
+  // 核心滚动逻辑：仅首次加载时跳到底部
+  // 注意：加载更多历史记录时不应该触发滚动，用户应该能继续往上滑
+  const initialHistoryLoadedRef = useRef(false); // 标记首次历史记录是否已加载
+  
   useEffect(() => {
-    if (history.length > 0) {
-      // 首次加载时直接跳到底部（instant），避免长时间滚动
-      if (isInitialLoadRef.current) {
-        
-        // 定义强制跳转底部的函数
-        const jumpToBottom = () => {
-            if (scrollContainerRef.current) {
-                // 1. 临时覆盖 CSS 的 scroll-smooth，强制变为 auto 以实现瞬间跳转
-                scrollContainerRef.current.style.scrollBehavior = 'auto';
-                // 2. 设置滚动位置
-                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-            }
-        };
+    // 只在首次加载历史记录时跳到底部
+    // 后续加载更多历史记录时不触发任何滚动
+    if (history.length > 0 && !initialHistoryLoadedRef.current) {
+      initialHistoryLoadedRef.current = true;
+      
+      // 定义强制跳转底部的函数
+      const jumpToBottom = () => {
+          if (scrollContainerRef.current) {
+              // 1. 临时覆盖 CSS 的 scroll-smooth，强制变为 auto 以实现瞬间跳转
+              scrollContainerRef.current.style.scrollBehavior = 'auto';
+              // 2. 设置滚动位置
+              scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+          }
+      };
 
-        // 策略：分阶段多次执行，确保在 DOM 渲染和图片初步布局后都能滚动到底部
-        
-        // 第一次：React 渲染循环结束后立即执行
-        requestAnimationFrame(() => {
-            jumpToBottom();
-            
-            // 第二次：给一点时间让 DOM 布局稳定 (100ms)
-            setTimeout(() => {
-                jumpToBottom();
-            }, 100);
+      // 策略：分阶段多次执行，确保在 DOM 渲染和图片初步布局后都能滚动到底部
+      
+      // 第一次：React 渲染循环结束后立即执行
+      requestAnimationFrame(() => {
+          jumpToBottom();
+          
+          // 第二次：给一点时间让 DOM 布局稳定 (100ms)
+          setTimeout(() => {
+              jumpToBottom();
+          }, 100);
 
-            // 第三次：给更多时间等待部分图片占位 (300ms)
-            // 并在结束后恢复平滑滚动，关闭初始加载标记
-            setTimeout(() => {
-                jumpToBottom();
-                
-                // 恢复 CSS 定义的平滑滚动
-                if (scrollContainerRef.current) {
-                    scrollContainerRef.current.style.scrollBehavior = '';
-                }
-                isInitialLoadRef.current = false;
-            }, 300);
-        });
-
-      } else {
-        // 后续更新使用平滑滚动
-        scrollToBottom();
-      }
+          // 第三次：给更多时间等待部分图片占位 (300ms)
+          // 并在结束后恢复平滑滚动，关闭初始加载标记
+          setTimeout(() => {
+              jumpToBottom();
+              
+              // 恢复 CSS 定义的平滑滚动
+              if (scrollContainerRef.current) {
+                  scrollContainerRef.current.style.scrollBehavior = '';
+              }
+              isInitialLoadRef.current = false;
+          }, 300);
+      });
     }
   }, [history.length]);
 
@@ -431,24 +507,39 @@ export default function Create() {
     // 不再显示 toast，改为显示 ErrorCard
   };
 
-  // 监听滚动，显示/隐藏回到底部按钮
+  // 监听滚动，显示/隐藏回到底部按钮 + 滚动到顶部时加载更多
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
+
+    let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
       // 距离底部超过 200px 时显示按钮
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
       setShowScrollButton(distanceFromBottom > 200);
+      
+      // 滚动到顶部附近时加载更多（距离顶部 100px 以内）
+      // 使用防抖避免重复触发
+      if (scrollTop < 100 && hasMore && !isLoadingMore && !isInitialLoadRef.current) {
+        if (scrollTimeout) clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+          loadMoreHistory();
+        }, 100);
+      }
     };
 
-    // 初始检查一次
-    handleScroll();
+    // 初始检查一次（延迟执行，避免首次加载时触发）
+    const initTimeout = setTimeout(handleScroll, 500);
 
     container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [history.length]); // 当历史记录变化时重新绑定
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      clearTimeout(initTimeout);
+    };
+  }, [hasMore, isLoadingMore, loadMoreHistory]); // 移除 history.length 依赖，避免重复绑定
 
   // 重新生成：使用历史记录的提示词和参考图
   const handleRegenerate = async (item: GenerationHistory) => {
@@ -551,24 +642,65 @@ export default function Create() {
     }
   };
 
-  // 重新生成批次：使用相同的提示词重新生成
-  const handleRegenerateBatch = (batch: BatchResult) => {
+  // 重新生成批次（带参考图）：使用相同的提示词和参考图重新生成
+  const handleRegenerateBatchWithRef = async (batch: BatchResult) => {
     if (isTaskRunning) {
       toast.warning('请等待当前任务完成后再操作');
       return;
     }
-    setPromptUpdateKey(prev => prev + 1);
-    setSelectedPrompt(batch.prompt);
-    setCurrentImageCount(batch.imageCount);
-    setTimeout(() => setTriggerGenerate(true), 100);
+    try {
+      // 加载参考图为 File 对象
+      const refFiles: File[] = [];
+      if (batch.refImages && batch.refImages.length > 0) {
+        for (const url of batch.refImages) {
+          const file = await loadImageAsFile(url);
+          if (file) {
+            refFiles.push(file);
+          }
+        }
+      }
+      
+      setPromptUpdateKey(prev => prev + 1);
+      setSelectedPrompt(batch.prompt);
+      setSelectedFiles(refFiles);
+      setCurrentImageCount(batch.imageCount);
+      setTimeout(() => setTriggerGenerate(true), 200);
+    } catch (error) {
+      console.error('加载参考图失败:', error);
+      // 即使参考图加载失败，也继续生成
+      setPromptUpdateKey(prev => prev + 1);
+      setSelectedPrompt(batch.prompt);
+      setCurrentImageCount(batch.imageCount);
+      setTimeout(() => setTriggerGenerate(true), 200);
+    }
   };
 
-  // 编辑批次提示词：填充提示词到输入框，但不自动发送
-  const handleEditBatchPrompt = (batch: BatchResult) => {
-    setPromptUpdateKey(prev => prev + 1);
-    setSelectedPrompt(batch.prompt);
-    setTimeout(scrollToBottom, 100);
-    toast.success('已填充提示词，可编辑后发送');
+  // 编辑批次提示词（带参考图）：填充提示词和参考图到输入框，但不自动发送
+  const handleEditBatchPromptWithRef = async (batch: BatchResult) => {
+    try {
+      // 加载参考图为 File 对象
+      const refFiles: File[] = [];
+      if (batch.refImages && batch.refImages.length > 0) {
+        for (const url of batch.refImages) {
+          const file = await loadImageAsFile(url);
+          if (file) {
+            refFiles.push(file);
+          }
+        }
+      }
+      
+      setPromptUpdateKey(prev => prev + 1);
+      setSelectedPrompt(batch.prompt);
+      setSelectedFiles(refFiles);
+      setTimeout(scrollToBottom, 100);
+      toast.success(refFiles.length > 0 ? '已填充提示词和参考图，可编辑后发送' : '已填充提示词，可编辑后发送');
+    } catch (error) {
+      console.error('加载参考图失败:', error);
+      setPromptUpdateKey(prev => prev + 1);
+      setSelectedPrompt(batch.prompt);
+      setTimeout(scrollToBottom, 100);
+      toast.success('已填充提示词，可编辑后发送');
+    }
   };
 
   // SSE 流式生成事件处理
@@ -584,6 +716,7 @@ export default function Create() {
       prompt: event.prompt,
       timestamp: Date.now(),
       imageCount: event.count,
+      refImages: event.ref_images || [], // 保存参考图
     };
     setStreamingBatch(newBatch);
     setTimeout(scrollToBottom, 100);
@@ -621,6 +754,7 @@ export default function Create() {
           isLoading: false,
           index,
         })),
+        refImages: event.ref_images || streamingBatch.refImages || [], // 保存参考图
       };
       setBatchResults(prev => [...prev, finalBatch]);
     }
@@ -648,6 +782,7 @@ export default function Create() {
     items?: GenerationHistory[]; // 批次时使用
     prompt: string;
     timestamp: string;
+    refImages?: string;        // 参考图 JSON 字符串（多图批次时使用）
   }
   
   const groupedHistory = React.useMemo((): HistoryDisplayItem[] => {
@@ -655,7 +790,8 @@ export default function Create() {
     const batchMap = new Map<string, GenerationHistory[]>();
     const processedBatchIds = new Set<string>();
     
-    // 先按时间正序排列（旧在前）
+    // history 是 desc 排序（最新在前：69, 68, 67...）
+    // 我们需要显示为 asc（旧在前：1, 2, 3...），所以 reverse
     const sortedHistory = [...history].reverse();
     
     // 第一遍：收集所有批次的图片
@@ -669,7 +805,7 @@ export default function Create() {
       }
     }
     
-    // 第二遍：构建显示列表
+    // 第二遍：构建显示列表（按时间正序，旧在前）
     for (const item of sortedHistory) {
       if (item.batch_id && item.batch_total && item.batch_total > 1) {
         // 多图批次：只在第一次遇到该批次时处理
@@ -682,12 +818,14 @@ export default function Create() {
           // 即使批次不完整也显示（部分成功的情况）
           if (batchItems.length > 1) {
             // 多张图片，显示为批次
+            // 参考图从第一个 item 获取（同一批次的参考图相同）
             result.push({
               type: 'batch',
               batchId: item.batch_id,
               items: batchItems,
               prompt: batchItems[0].prompt,
               timestamp: batchItems[0].created_at,
+              refImages: batchItems[0].ref_images,
             });
           } else if (batchItems.length === 1) {
             // 只有一张图片成功，显示为单图
@@ -753,8 +891,25 @@ export default function Create() {
             </div>
           )}
 
-          {/* 历史消息流 */}
-          <div className="space-y-8">
+          {/* 加载更多指示器 */}
+          {isLoadingMore && (
+            <div className="flex justify-center py-4">
+              <div className="flex items-center gap-2 text-gray-400">
+                <div className="w-4 h-4 border-2 border-gray-300 border-t-red-500 rounded-full animate-spin"></div>
+                <span className="text-sm">加载更多...</span>
+              </div>
+            </div>
+          )}
+          
+          {/* 没有更多数据提示 */}
+          {!hasMore && history.length > 0 && (
+            <div className="flex justify-center py-4">
+              <span className="text-xs text-gray-300">已加载全部历史记录</span>
+            </div>
+          )}
+
+          {/* 历史消息流 - 历史记录不使用动画，静默显示 */}
+          <div className="space-y-8" ref={topSentinelRef}>
           {chatHistory.map((displayItem, index) => {
             // 单图记录
             if (displayItem.type === 'single' && displayItem.item) {
@@ -764,8 +919,7 @@ export default function Create() {
               return (
                 <div
                     key={item.id || `history-${index}`}
-                    className="flex flex-col w-full fade-in-up"
-                    style={{ animationDelay: `${index * 50}ms` }}
+                    className="flex flex-col w-full"
                 >
                     {/* 用户指令气泡 */}
                     <div className="flex justify-end mb-3 px-2">
@@ -826,19 +980,47 @@ export default function Create() {
               return (
                 <div
                     key={displayItem.batchId || `batch-${index}`}
-                    className="flex flex-col w-full fade-in-up"
-                    style={{ animationDelay: `${index * 50}ms` }}
+                    className="flex flex-col w-full"
                 >
                     {/* 用户指令气泡 */}
                     <div className="flex justify-end items-center gap-2 mb-3 px-2">
                         {/* 操作按钮 */}
                         <div className="flex gap-1">
                           <button
-                            onClick={() => {
-                              setPromptUpdateKey(prev => prev + 1);
-                              setSelectedPrompt(displayItem.prompt);
-                              setTimeout(scrollToBottom, 100);
-                              toast.success('已填充提示词，可编辑后发送');
+                            onClick={async () => {
+                              // 多图批次编辑：加载提示词和参考图
+                              try {
+                                let refImageUrls: string[] = [];
+                                try {
+                                  if (displayItem.refImages) {
+                                    const parsed = JSON.parse(displayItem.refImages);
+                                    refImageUrls = Array.isArray(parsed) ? parsed : [];
+                                  }
+                                } catch (e) {
+                                  console.warn('解析参考图失败:', e);
+                                }
+                                
+                                // 加载参考图为 File 对象
+                                const refFiles: File[] = [];
+                                for (const url of refImageUrls) {
+                                  const file = await loadImageAsFile(url);
+                                  if (file) {
+                                    refFiles.push(file);
+                                  }
+                                }
+                                
+                                setPromptUpdateKey(prev => prev + 1);
+                                setSelectedPrompt(displayItem.prompt);
+                                setSelectedFiles(refFiles);
+                                setTimeout(scrollToBottom, 100);
+                                toast.success('已填充提示词和参考图，可编辑后发送');
+                              } catch (error) {
+                                console.error('加载参考图失败:', error);
+                                setPromptUpdateKey(prev => prev + 1);
+                                setSelectedPrompt(displayItem.prompt);
+                                setTimeout(scrollToBottom, 100);
+                                toast.success('已填充提示词，可编辑后发送');
+                              }
                             }}
                             className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                             title="编辑提示词"
@@ -846,12 +1028,45 @@ export default function Create() {
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => handleRegenerateWithCheck(() => {
-                              setPromptUpdateKey(prev => prev + 1);
-                              setSelectedPrompt(displayItem.prompt);
-                              setCurrentImageCount(batchTotal);
-                              setTimeout(() => setTriggerGenerate(true), 100);
-                            })}
+                            onClick={async () => {
+                              if (isTaskRunning) {
+                                toast.warning('请等待当前任务完成后再操作');
+                                return;
+                              }
+                              // 多图批次重新生成：加载提示词和参考图
+                              try {
+                                let refImageUrls: string[] = [];
+                                try {
+                                  if (displayItem.refImages) {
+                                    const parsed = JSON.parse(displayItem.refImages);
+                                    refImageUrls = Array.isArray(parsed) ? parsed : [];
+                                  }
+                                } catch (e) {
+                                  console.warn('解析参考图失败:', e);
+                                }
+                                
+                                // 加载参考图为 File 对象
+                                const refFiles: File[] = [];
+                                for (const url of refImageUrls) {
+                                  const file = await loadImageAsFile(url);
+                                  if (file) {
+                                    refFiles.push(file);
+                                  }
+                                }
+                                
+                                setPromptUpdateKey(prev => prev + 1);
+                                setSelectedPrompt(displayItem.prompt);
+                                setSelectedFiles(refFiles);
+                                setCurrentImageCount(batchTotal);
+                                setTimeout(() => setTriggerGenerate(true), 200);
+                              } catch (error) {
+                                console.error('加载参考图失败:', error);
+                                setPromptUpdateKey(prev => prev + 1);
+                                setSelectedPrompt(displayItem.prompt);
+                                setCurrentImageCount(batchTotal);
+                                setTimeout(() => setTriggerGenerate(true), 200);
+                              }
+                            }}
                             disabled={isTaskRunning}
                             className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
                             title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
@@ -882,6 +1097,19 @@ export default function Create() {
                           onImageClick={setLightboxImage}
                           onUseAsReference={handleUseAsReference}
                           prompt={displayItem.prompt}
+                          refImages={(() => {
+                            // 解析参考图
+                            try {
+                              if (displayItem.refImages) {
+                                const parsed = JSON.parse(displayItem.refImages);
+                                return Array.isArray(parsed) ? parsed : [];
+                              }
+                            } catch (e) {
+                              console.warn('解析参考图失败:', e);
+                            }
+                            return [];
+                          })()}
+                          onRefImageClick={setLightboxImage}
                         />
                       </div>
                     </div>
@@ -913,18 +1141,15 @@ export default function Create() {
                       </span>
                     </div>
                     <div className="w-full max-w-xl">
-                      {/* 多图生成时显示 ImageGrid 占位 */}
-                      {taskImageCount > 1 ? (
-                        <ImageGrid
-                          images={Array.from({ length: taskImageCount }, (_, index) => ({
-                            isLoading: true,
-                            index,
-                          }))}
-                          onImageClick={() => {}}
-                        />
-                      ) : (
-                        <PlaceholderCard key={task.task_id} />
-                      )}
+                      {/* 使用 ImageGrid 显示占位，保持一致的样式 */}
+                      <ImageGrid
+                        images={Array.from({ length: taskImageCount }, (_, index) => ({
+                          isLoading: true,
+                          index,
+                        }))}
+                        onImageClick={() => {}}
+                        showFooter={true}
+                      />
                     </div>
                   </div>
                 </div>
@@ -954,6 +1179,9 @@ export default function Create() {
                       onImageClick={setLightboxImage}
                       onUseAsReference={handleUseAsReference}
                       prompt={streamingBatch.prompt}
+                      showFooter={true}
+                      refImages={streamingBatch.refImages}
+                      onRefImageClick={setLightboxImage}
                     />
                   </div>
                 </div>
@@ -979,18 +1207,15 @@ export default function Create() {
                       </span>
                   </div>
                   <div className="w-full max-w-xl">
-                    {/* 多图生成时显示 ImageGrid 占位 */}
-                    {currentImageCount > 1 ? (
-                      <ImageGrid
-                        images={Array.from({ length: currentImageCount }, (_, index) => ({
-                          isLoading: true,
-                          index,
-                        }))}
-                        onImageClick={() => {}}
-                      />
-                    ) : (
-                      <PlaceholderCard key={generatingId} />
-                    )}
+                    {/* 多图生成时显示 ImageGrid 占位，单图也使用 ImageGrid 保持一致的样式 */}
+                    <ImageGrid
+                      images={Array.from({ length: currentImageCount }, (_, index) => ({
+                        isLoading: true,
+                        index,
+                      }))}
+                      onImageClick={() => {}}
+                      showFooter={true}
+                    />
                   </div>
                 </div>
               </div>
@@ -1064,14 +1289,14 @@ export default function Create() {
                   {/* 操作按钮 */}
                   <div className="flex gap-1">
                     <button
-                      onClick={() => handleEditBatchPrompt(batch)}
+                      onClick={() => handleEditBatchPromptWithRef(batch)}
                       className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                       title="编辑提示词"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => handleRegenerateBatch(batch)}
+                      onClick={() => handleRegenerateBatchWithRef(batch)}
                       disabled={isTaskRunning}
                       className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
                       title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
@@ -1105,6 +1330,8 @@ export default function Create() {
                       onImageClick={setLightboxImage}
                       onUseAsReference={handleUseAsReference}
                       prompt={batch.prompt}
+                      refImages={batch.refImages}
+                      onRefImageClick={setLightboxImage}
                     />
                   </div>
                 </div>

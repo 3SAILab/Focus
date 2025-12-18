@@ -17,10 +17,14 @@ interface ImageGridProps {
   onImageClick: (url: string) => void;
   onUseAsReference?: (url: string) => void;
   prompt?: string;        // 用于显示在错误卡片中
+  showFooter?: boolean;   // 是否在加载占位卡片中显示底部区域（与 ImageCard 保持一致）
+  refImages?: string[];   // 参考图 URL 列表（多图批次时显示）
+  onRefImageClick?: (url: string) => void; // 点击参考图的回调
 }
 
 // 加载中占位卡片
-function LoadingCard() {
+// showFooter: 是否显示底部占位区域（与 ImageCard 保持一致的高度）
+function LoadingCard({ showFooter = false }: { showFooter?: boolean }) {
   return (
     <div className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100 relative w-full">
       <div className="relative w-full aspect-square bg-gray-50 overflow-hidden">
@@ -31,6 +35,15 @@ function LoadingCard() {
           <span className="text-xs font-medium text-gray-400">生成中...</span>
         </div>
       </div>
+      {/* 底部占位区域，与 ImageCard 的 p-3 区域保持一致 */}
+      {showFooter && (
+        <div className="p-3">
+          <div className="h-4 bg-gray-100 rounded w-3/4 mb-2"></div>
+          <div className="flex items-center justify-end">
+            <div className="h-3 bg-gray-100 rounded w-12"></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -181,14 +194,18 @@ export default function ImageGrid({
   images,
   onImageClick,
   onUseAsReference,
+  showFooter = false,
+  refImages = [],
+  onRefImageClick,
 }: ImageGridProps) {
   const count = images.length;
 
   // 根据图片数量确定网格样式
   const getGridClassName = () => {
     if (count === 1) {
-      // 单图：限制最大宽度，与双图中单张图片尺寸一致
-      return 'grid grid-cols-1 max-w-[280px]';
+      // 单图：使用与 ImageCard 容器相同的最大宽度 (max-w-xl)
+      // 这样加载动画和最终图片大小一致
+      return 'grid grid-cols-1 max-w-xl';
     }
     // 2, 3, 4 张图都使用 2 列布局
     return 'grid grid-cols-2 gap-3 max-w-xl';
@@ -196,7 +213,7 @@ export default function ImageGrid({
 
   const renderItem = (item: ImageGridItem) => {
     if (item.isLoading) {
-      return <LoadingCard key={`loading-${item.index}`} />;
+      return <LoadingCard key={`loading-${item.index}`} showFooter={showFooter} />;
     }
 
     if (item.error) {
@@ -220,12 +237,39 @@ export default function ImageGrid({
     }
 
     // 默认显示加载状态
-    return <LoadingCard key={`default-${item.index}`} />;
+    return <LoadingCard key={`default-${item.index}`} showFooter={showFooter} />;
   };
 
   return (
-    <div className={getGridClassName()}>
-      {images.map(renderItem)}
+    <div className="relative">
+      {/* 参考图显示在左上角 */}
+      {refImages.length > 0 && (
+        <div className="absolute top-2 left-2 flex gap-1 z-10">
+          {refImages.slice(0, 3).map((refUrl, idx) => (
+            <img
+              key={idx}
+              src={refUrl}
+              className="w-8 h-8 rounded border-2 border-white shadow-md object-cover cursor-pointer hover:scale-110 transition-transform"
+              draggable
+              onClick={(e) => {
+                e.stopPropagation();
+                onRefImageClick?.(refUrl);
+              }}
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/uri-list', refUrl);
+                e.dataTransfer.setData('text/plain', refUrl);
+                e.dataTransfer.setData('application/x-sigma-image', refUrl);
+                e.dataTransfer.effectAllowed = 'copy';
+              }}
+              title={`参考图 ${idx + 1} (可拖拽)`}
+              alt={`参考图 ${idx + 1}`}
+            />
+          ))}
+        </div>
+      )}
+      <div className={getGridClassName()}>
+        {images.map(renderItem)}
+      </div>
     </div>
   );
 }
