@@ -55,12 +55,11 @@ graph TB
 |------|------|
 | `main.js` | 主进程入口，管理窗口、后端进程、IPC 通信 |
 | `preload.js` | 预加载脚本，暴露安全的 API 给渲染进程 |
-| `tls-manager.js` | TLS 证书生成和管理 |
 
 **主要功能：**
 - 创建和管理 BrowserWindow
 - 启动和监控后端进程
-- 生成自签名 TLS 证书
+- 自动端口发现和管理
 - 提供 IPC 通信桥接
 
 ### 2. React 前端层
@@ -113,7 +112,7 @@ sequenceDiagram
     participant G as Gemini API
     
     R->>E: IPC: getBackendUrl()
-    E-->>R: https://localhost:8080
+    E-->>R: http://localhost:8080
     R->>B: POST /generate (FormData)
     B->>G: POST /generateContent
     G-->>B: 生成结果
@@ -131,7 +130,7 @@ sequenceDiagram
     
     Renderer->>Preload: window.electronAPI.getBackendUrl()
     Preload->>Main: ipcRenderer.invoke('get-backend-url')
-    Main-->>Preload: 'https://localhost:8080'
+    Main-->>Preload: 'http://localhost:8080'
     Preload-->>Renderer: Promise<string>
 ```
 
@@ -191,11 +190,11 @@ stateDiagram-v2
 
 ## 安全设计
 
-### TLS 加密
+### 本地通信
 
-- 后端使用 HTTPS 协议
-- 自签名证书在首次启动时生成
-- 证书存储在用户数据目录
+- 后端使用 HTTP 协议（本地通信无需加密）
+- 支持自动端口发现（默认 8080，如被占用自动切换）
+- 端口信息通过文件共享给前端
 
 ### API Key 保护
 

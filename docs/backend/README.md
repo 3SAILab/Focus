@@ -34,8 +34,7 @@ backend/
 │   ├── generation_history.go
 │   ├── generation_stats.go
 │   └── generation_task.go
-├── server/              # 服务器配置
-│   └── tls.go           # TLS 配置
+├── server/              # 服务器配置（已废弃，使用 HTTP）
 ├── types/               # 类型定义
 │   └── ai_types.go      # AI API 类型
 └── utils/               # 工具函数

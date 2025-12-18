@@ -56,14 +56,19 @@ export interface GenerationHistory {
   "id": 1,
   "prompt": "一只可爱的猫咪",
   "original_prompt": "画一只猫",
-  "image_url": "https://localhost:8080/images/gen_123.png",
+  "image_url": "http://localhost:8080/images/gen_123.png",
   "file_name": "gen_123.png",
-  "ref_images": "[\"https://localhost:8080/uploads/ref_123.png\"]",
+  "ref_images": "[\"http://localhost:8080/uploads/ref_123.png\"]",
   "type": "create",
+  "batch_id": "batch_123",
+  "batch_index": 0,
+  "batch_total": 2,
   "created_at": "2025-01-01T12:00:00Z",
   "updated_at": "2025-01-01T12:00:00Z"
 }
 ```
+
+**注意**: 后端会自动将旧数据中的 `https://` URL 转换为当前端口的 `http://` URL。
 
 ---
 
