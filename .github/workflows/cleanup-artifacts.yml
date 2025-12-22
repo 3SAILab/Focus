@@ -45,7 +45,7 @@ jobs:
         run: |
           echo "=== Deleting old workflow runs ==="
           
-          # 保留最近 5 次运行，删除其他的
+          # 保留最近 2 次运行，删除其他的
           RUNS=$(gh run list --limit 200 --json databaseId -q '.[2:][].databaseId')
           
           if [ -z "$RUNS" ]; then
