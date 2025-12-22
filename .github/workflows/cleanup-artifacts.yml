@@ -3,11 +3,6 @@ name: Cleanup Artifacts
 on:
   # 手动触发
   workflow_dispatch:
-    inputs:
-      days_old:
-        description: '删除多少天前的 artifacts (默认 0 = 删除所有)'
-        required: false
-        default: '0'
   # 每周一凌晨自动清理
   schedule:
     - cron: '0 0 * * 1'
@@ -19,58 +14,52 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete old artifacts
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const daysOld = parseInt('${{ github.event.inputs.days_old }}' || '0');
-            const cutoffDate = daysOld > 0 
-              ? new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000)
-              : null;
-            
-            console.log(`Deleting artifacts${cutoffDate ? ` older than ${daysOld} days` : ' (all)'}`);
-            
-            let deletedCount = 0;
-            let totalSize = 0;
-            let page = 1;
-            
-            while (true) {
-              const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: 100,
-                page: page
-              });
-              
-              if (artifacts.artifacts.length === 0) break;
-              
-              for (const artifact of artifacts.artifacts) {
-                const createdAt = new Date(artifact.created_at);
-                
-                // 如果设置了天数限制，只删除超过该天数的
-                if (cutoffDate && createdAt > cutoffDate) {
-                  console.log(`Skipping: ${artifact.name} (created ${artifact.created_at})`);
-                  continue;
-                }
-                
-                console.log(`Deleting: ${artifact.name} (${(artifact.size_in_bytes / 1024 / 1024).toFixed(2)} MB, created ${artifact.created_at})`);
-                
-                try {
-                  await github.rest.actions.deleteArtifact({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    artifact_id: artifact.id
-                  });
-                  deletedCount++;
-                  totalSize += artifact.size_in_bytes;
-                } catch (error) {
-                  console.log(`Failed to delete ${artifact.name}: ${error.message}`);
-                }
-              }
-              
-              page++;
-            }
-            
-            console.log(`\n=== Summary ===`);
-            console.log(`Deleted ${deletedCount} artifacts`);
-            console.log(`Freed ${(totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`);
+      - name: Delete all artifacts using GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Listing all artifacts ==="
+          
+          # 获取所有 artifacts 并删除
+          ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/artifacts --paginate -q '.artifacts[].id')
+          
+          if [ -z "$ARTIFACTS" ]; then
+            echo "No artifacts found"
+            exit 0
+          fi
+          
+          COUNT=0
+          for ID in $ARTIFACTS; do
+            echo "Deleting artifact ID: $ID"
+            gh api -X DELETE repos/${{ github.repository }}/actions/artifacts/$ID || true
+            COUNT=$((COUNT + 1))
+          done
+          
+          echo ""
+          echo "=== Summary ==="
+          echo "Deleted $COUNT artifacts"
+          
+      - name: Delete old workflow runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Deleting old workflow runs ==="
+          
+          # 保留最近 5 次运行，删除其他的
+          RUNS=$(gh run list --limit 200 --json databaseId -q '.[2:][].databaseId')
+          
+          if [ -z "$RUNS" ]; then
+            echo "No old runs to delete"
+            exit 0
+          fi
+          
+          COUNT=0
+          for ID in $RUNS; do
+            echo "Deleting run ID: $ID"
+            gh run delete $ID || true
+            COUNT=$((COUNT + 1))
+          done
+          
+          echo ""
+          echo "=== Summary ==="
+          echo "Deleted $COUNT workflow runs"
