@@ -1,26 +1,23 @@
 /**
  * End-to-End Tests for Electron Application
- * Tests complete application lifecycle including startup, communication, HTTPS, and cleanup
+ * Tests complete application lifecycle including startup, communication, and cleanup
  * 
- * Requirements: 3.1, 3.2, 3.3, 8.1, 8.2
+ * Requirements: 3.1, 3.2, 3.3
  */
 
 const { spawn } = require('child_process');
-const https = require('https');
+const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const TLSManager = require('./tls-manager');
 
 // Test configuration
 const TEST_TIMEOUT = 60000; // 60 seconds for E2E tests
 const BACKEND_PORT = 8080;
-const BACKEND_URL = `https://localhost:${BACKEND_PORT}`;
+const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 const HEALTH_CHECK_PATH = '/history';
 
 describe('E2E: Application Lifecycle', () => {
   let backendProcess;
-  let tlsManager;
-  let certPaths;
   const userDataPath = path.join(__dirname, '..', 'test-data');
 
   beforeAll(async () => {
@@ -28,16 +25,6 @@ describe('E2E: Application Lifecycle', () => {
     if (!fs.existsSync(userDataPath)) {
       fs.mkdirSync(userDataPath, { recursive: true });
     }
-
-    // Initialize TLS manager
-    tlsManager = new TLSManager(userDataPath);
-    
-    // Generate TLS certificates for testing
-    if (!tlsManager.certificateExists()) {
-      await tlsManager.generateCertificate();
-    }
-    
-    certPaths = tlsManager.getCertificatePaths();
   }, TEST_TIMEOUT);
 
   describe('Path Management in Packaged App', () => {
@@ -198,19 +185,8 @@ describe('E2E: Application Lifecycle', () => {
   });
 
   describe('Application Startup Flow', () => {
-    test('should generate TLS certificates on first run', async () => {
-      // Validates: Requirements 8.3
-      expect(certPaths).toBeDefined();
-      expect(certPaths.certPath).toBeDefined();
-      expect(certPaths.keyPath).toBeDefined();
-      
-      // Verify certificate files exist
-      expect(fs.existsSync(certPaths.certPath)).toBe(true);
-      expect(fs.existsSync(certPaths.keyPath)).toBe(true);
-    }, TEST_TIMEOUT);
-
-    test('should start backend process with TLS environment variables', async () => {
-      // Validates: Requirements 3.1, 8.3
+    test('should start backend process with environment variables', async () => {
+      // Validates: Requirements 3.1
       const backendPath = path.join(__dirname, '..', 'backend', 'main.go');
       
       // Check if backend source exists
@@ -221,9 +197,6 @@ describe('E2E: Application Lifecycle', () => {
 
       const env = {
         ...process.env,
-        TLS_CERT_PATH: certPaths.certPath,
-        TLS_KEY_PATH: certPaths.keyPath,
-        USE_TLS: 'true',
         PORT: BACKEND_PORT.toString(),
         DB_PATH: path.join(userDataPath, 'test.db'),
         UPLOAD_DIR: path.join(userDataPath, 'uploads'),
@@ -272,55 +245,26 @@ describe('E2E: Application Lifecycle', () => {
   });
 
   describe('Frontend-Backend Communication', () => {
-    test('should establish HTTPS connection to backend', async () => {
-      // Validates: Requirements 8.1, 8.2
+    test('should establish HTTP connection to backend', async () => {
+      // Validates: Requirements 3.1
       if (!backendProcess || !backendProcess.pid) {
-        console.warn('Backend not running, skipping HTTPS connection test');
+        console.warn('Backend not running, skipping HTTP connection test');
         return;
       }
 
-      const response = await makeHttpsRequest(HEALTH_CHECK_PATH);
+      const response = await makeHttpRequest(HEALTH_CHECK_PATH);
       
       expect(response).toBeDefined();
       expect(response.statusCode).toBe(200);
     }, TEST_TIMEOUT);
 
-    test('should use HTTPS protocol for all API requests', async () => {
-      // Validates: Requirements 8.1
+    test('should use HTTP protocol for API requests', async () => {
+      // Validates: Requirements 3.1
       const url = BACKEND_URL;
       
-      expect(url).toMatch(/^https:\/\//);
-      expect(url).not.toMatch(/^http:\/\//);
+      expect(url).toMatch(/^http:\/\//);
       expect(url).toContain('localhost');
     });
-
-    test('should trust self-signed certificates in Electron environment', async () => {
-      // Validates: Requirements 8.4
-      if (!backendProcess || !backendProcess.pid) {
-        console.warn('Backend not running, skipping certificate trust test');
-        return;
-      }
-
-      // Make request with rejectUnauthorized: false (simulating Electron behavior)
-      const response = await makeHttpsRequest(HEALTH_CHECK_PATH, { rejectUnauthorized: false });
-      
-      expect(response).toBeDefined();
-      expect(response.statusCode).toBe(200);
-    }, TEST_TIMEOUT);
-
-    test('should encrypt request and response data', async () => {
-      // Validates: Requirements 8.2
-      if (!backendProcess || !backendProcess.pid) {
-        console.warn('Backend not running, skipping encryption test');
-        return;
-      }
-
-      // Verify TLS is being used
-      const response = await makeHttpsRequest(HEALTH_CHECK_PATH);
-      
-      expect(response).toBeDefined();
-      expect(response.encrypted).toBe(true); // Connection should be encrypted
-    }, TEST_TIMEOUT);
 
     test('should handle API errors gracefully', async () => {
       // Validates: Requirements 3.2
@@ -330,58 +274,18 @@ describe('E2E: Application Lifecycle', () => {
       }
 
       try {
-        await makeHttpsRequest('/nonexistent-endpoint');
+        await makeHttpRequest('/nonexistent-endpoint');
       } catch (error) {
         // Should handle 404 or other errors
         expect(error).toBeDefined();
       }
     }, TEST_TIMEOUT);
-  });
-
-  describe('HTTPS Encryption', () => {
-    test('should use TLS 1.2 or higher', async () => {
-      // Validates: Requirements 8.1, 8.2
-      if (!backendProcess || !backendProcess.pid) {
-        console.warn('Backend not running, skipping TLS version test');
-        return;
-      }
-
-      const response = await makeHttpsRequest(HEALTH_CHECK_PATH);
-      
-      expect(response).toBeDefined();
-      expect(response.encrypted).toBe(true);
-      // TLS version should be 1.2 or higher
-      if (response.tlsVersion) {
-        expect(['TLSv1.2', 'TLSv1.3']).toContain(response.tlsVersion);
-      }
-    }, TEST_TIMEOUT);
-
-    test('should prevent unencrypted HTTP connections', () => {
-      // Validates: Requirements 8.1
-      const httpsUrl = BACKEND_URL;
-      const httpUrl = httpsUrl.replace('https://', 'http://');
-      
-      expect(httpsUrl).toMatch(/^https:\/\//);
-      expect(httpUrl).toMatch(/^http:\/\//);
-      
-      // Application should only use HTTPS URLs
-      expect(BACKEND_URL).toBe(httpsUrl);
-      expect(BACKEND_URL).not.toBe(httpUrl);
-    });
 
     test('should use localhost for communication', () => {
-      // Validates: Requirements 8.5
+      // Validates: Requirements 3.1
       expect(BACKEND_URL).toContain('localhost');
       expect(BACKEND_URL).not.toContain('0.0.0.0');
       expect(BACKEND_URL).not.toMatch(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/);
-    });
-
-    test('should validate certificate paths are configured', () => {
-      // Validates: Requirements 8.3
-      expect(certPaths.certPath).toBeDefined();
-      expect(certPaths.keyPath).toBeDefined();
-      expect(certPaths.certPath).toContain('.pem');
-      expect(certPaths.keyPath).toContain('.pem');
     });
   });
 
@@ -568,10 +472,9 @@ function checkBackendHealth() {
       path: HEALTH_CHECK_PATH,
       method: 'GET',
       timeout: 3000,
-      rejectUnauthorized: false, // Trust self-signed certificate
     };
 
-    const req = https.request(options, (res) => {
+    const req = http.request(options, (res) => {
       if (res.statusCode === 200) {
         resolve(true);
       } else {
@@ -592,8 +495,8 @@ function checkBackendHealth() {
   });
 }
 
-// Helper function to make HTTPS requests
-function makeHttpsRequest(path, customOptions = {}) {
+// Helper function to make HTTP requests
+function makeHttpRequest(path, customOptions = {}) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'localhost',
@@ -601,11 +504,10 @@ function makeHttpsRequest(path, customOptions = {}) {
       path: path,
       method: 'GET',
       timeout: 5000,
-      rejectUnauthorized: false, // Trust self-signed certificate
       ...customOptions,
     };
 
-    const req = https.request(options, (res) => {
+    const req = http.request(options, (res) => {
       let data = '';
 
       res.on('data', (chunk) => {
@@ -617,8 +519,6 @@ function makeHttpsRequest(path, customOptions = {}) {
           statusCode: res.statusCode,
           headers: res.headers,
           data: data,
-          encrypted: res.socket.encrypted || false,
-          tlsVersion: res.socket.getProtocol ? res.socket.getProtocol() : null,
         });
       });
     });

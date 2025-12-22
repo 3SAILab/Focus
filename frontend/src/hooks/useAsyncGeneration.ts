@@ -6,6 +6,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { api } from '../api';
 import type { GenerationTask, GenerationTypeValue } from '../type';
 import { useGlobalTask } from '../context/GlobalTaskContext';
+import { getErrorMessage } from '../utils/errorHandler';
 
 export interface UseAsyncGenerationOptions {
   onComplete: (task: GenerationTask) => void;
@@ -64,12 +65,10 @@ export function useAsyncGeneration(options: UseAsyncGenerationOptions): UseAsync
       // Handle error responses
       if (!response.ok) {
         const errData = await response.json();
-        const isQuotaError = response.status === 429 || 
-                           errData.error?.includes('429') ||
-                           errData.error?.includes('quota');
+        const { message, isQuotaError } = getErrorMessage(errData, response.status);
         if (isMountedRef.current) {
           setIsGenerating(false);
-          onErrorRef.current(errData.error || '请求失败', isQuotaError);
+          onErrorRef.current(message, isQuotaError);
         }
         return;
       }
@@ -90,14 +89,15 @@ export function useAsyncGeneration(options: UseAsyncGenerationOptions): UseAsync
         // No task_id, unexpected response
         if (isMountedRef.current) {
           setIsGenerating(false);
-          onErrorRef.current('服务器响应异常', false);
+          const { message, isQuotaError } = getErrorMessage('服务器响应异常');
+          onErrorRef.current(message, isQuotaError);
         }
       }
     } catch (error) {
       if (isMountedRef.current) {
         setIsGenerating(false);
-        const errorMessage = error instanceof Error ? error.message : '网络错误';
-        onErrorRef.current(errorMessage, false);
+        const { message, isQuotaError } = getErrorMessage(error);
+        onErrorRef.current(message, isQuotaError);
       }
     }
   }, [registerTask]);

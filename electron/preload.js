@@ -36,5 +36,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('backend-error', listener);
     };
   },
+  
+  // ===== Version Check APIs =====
+  // Requirements: 3.3
+  
+  /**
+   * Get local version info (versionCode, versionName)
+   * @returns {Promise<{versionCode: string, versionName: string}>}
+   */
+  getVersionInfo: () => ipcRenderer.invoke('get-version-info'),
+  
+  /**
+   * Check for updates against remote server
+   * @returns {Promise<VersionCheckResult>}
+   * VersionCheckResult: {
+   *   status: 'network_error' | 'fetch_error' | 'update_required' | 'up_to_date',
+   *   remoteVersion?: RemoteVersionInfo,
+   *   downloadUrl?: string,
+   *   errorMessage?: string
+   * }
+   */
+  checkUpdate: () => ipcRenderer.invoke('check-update'),
+  
+  /**
+   * Open download URL in default browser
+   * @param {string} url - Download URL to open
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  openDownloadUrl: (url) => ipcRenderer.invoke('open-download-url', url),
 });
 

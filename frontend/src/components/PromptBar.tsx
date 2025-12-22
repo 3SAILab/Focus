@@ -145,7 +145,7 @@ export default function PromptBar({
                 },
                 onError: (error) => {
                   console.error('[PromptBar] SSE Error:', error);
-                  const message = error.message || '生成失败';
+                  const { message } = getErrorMessage(error.message || error);
                   onError(message, currentPrompt, currentImageCount);
                   setIsGenerating(false);
                 },
@@ -183,7 +183,7 @@ export default function PromptBar({
               throw new Error('后端未返回图片地址');
             }
           } catch (error) {
-            const message = error instanceof Error ? error.message : '生成失败';
+            const { message } = getErrorMessage(error);
             onError(message, currentPrompt, currentImageCount);
             setIsGenerating(false);
           }
@@ -383,7 +383,7 @@ export default function PromptBar({
           },
           onError: (error) => {
             console.error('[PromptBar] SSE Error:', error);
-            const message = error.message || '生成失败';
+            const { message } = getErrorMessage(error.message || error);
             onError(message, currentPrompt, currentImageCount);
             setIsGenerating(false);
           },
@@ -421,7 +421,7 @@ export default function PromptBar({
         throw new Error('后端未返回图片地址');
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : '生成失败';
+      const { message } = getErrorMessage(error);
       onError(message, currentPrompt, currentImageCount);
       setIsGenerating(false);
     }

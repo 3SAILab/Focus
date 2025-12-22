@@ -1,14 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Trash2 } from 'lucide-react';
 import type { GenerationHistory } from '../type';
 import { api } from '../api';
 import { formatDate } from '../utils';
 import { PageHeader } from '../components/common';
+import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
+import { useToast } from '../context/ToastContext';
 
 export default function History() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [history, setHistory] = useState<GenerationHistory[]>([]);
   const [groupedHistory, setGroupedHistory] = useState<Record<string, GenerationHistory[]>>({});
+  const [deleteDate, setDeleteDate] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const loadHistory = async () => {
     try {
@@ -54,6 +60,38 @@ export default function History() {
     setGroupedHistory(sortedGrouped);
   }, [history]);
 
+  const handleDeleteClick = (e: React.MouseEvent, date: string) => {
+    e.stopPropagation(); // 阻止点击事件冒泡到父元素
+    setDeleteDate(date);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteDate) return;
+    
+    setIsDeleting(true);
+    try {
+      const response = await api.deleteHistoryByDate(deleteDate);
+      if (response.ok) {
+        const data = await response.json();
+        toast.success(`已删除 ${data.deleted} 条记录`);
+        // 从列表中移除已删除的日期
+        setHistory(prev => prev.filter(item => {
+          const itemDate = new Date(item.created_at).toISOString().split('T')[0];
+          return itemDate !== deleteDate;
+        }));
+      } else {
+        const data = await response.json();
+        toast.error(data.error || '删除失败');
+      }
+    } catch (error) {
+      console.error('删除失败:', error);
+      toast.error('删除失败，请重试');
+    } finally {
+      setIsDeleting(false);
+      setDeleteDate(null);
+    }
+  };
+
   return (
     <>
       <PageHeader title="历史记录" statusColor="blue" />
@@ -74,16 +112,26 @@ export default function History() {
             {Object.entries(groupedHistory).map(([date, items]) => (
               <div
                 key={date}
-                className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-shadow"
+                className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 cursor-pointer hover:shadow-md transition-shadow group relative"
                 onClick={() => navigate(`/history/${date}`)}
               >
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-gray-800">
                     {formatDate(date)}
                   </h2>
-                  <span className="text-sm text-gray-400">
-                    {items.length} 张图片
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-gray-400">
+                      {items.length} 张图片
+                    </span>
+                    {/* 删除按钮 */}
+                    <button
+                      onClick={(e) => handleDeleteClick(e, date)}
+                      className="w-8 h-8 bg-gray-100 hover:bg-red-500 text-gray-400 hover:text-white rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200"
+                      title="删除这一天的记录"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-4 gap-3">
                   {items.slice(0, 4).map((item, index) => (
@@ -108,6 +156,16 @@ export default function History() {
           </div>
         )}
       </div>
+
+      {/* 删除确认对话框 */}
+      <DeleteConfirmDialog
+        isOpen={!!deleteDate}
+        onClose={() => setDeleteDate(null)}
+        onConfirm={handleDeleteConfirm}
+        title="确认删除"
+        message={`确定要删除 ${deleteDate ? formatDate(deleteDate) : ''} 的所有记录吗？删除后将无法恢复，图片文件也会被删除，但不会影响生成次数统计。`}
+        isDeleting={isDeleting}
+      />
     </>
   );
 }

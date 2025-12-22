@@ -1,6 +1,7 @@
 {
   "name": "focus",
   "version": "1.0.2",
+  "versionCode": "202512221621",
   "description": "Focus AI Image Generation Tool - Beta版",
   "main": "electron/main.js",
   "scripts": {
@@ -25,10 +26,7 @@
     "test:electron": "jest electron/",
     "test:e2e": "jest electron/e2e.test.js",
     "test:unit": "jest --testPathIgnorePatterns=e2e.test.js",
-    "test:build": "jest electron/build-validation.test.js",
-    "build:all-sales": "node scripts/batch-build.js",
-    "build:sales": "node scripts/batch-build.js --sales",
-    "pack:all": "node scripts/build-all.js"
+    "test:build": "jest electron/build-validation.test.js"
   },
   "build": {
     "appId": "com.focus.app",

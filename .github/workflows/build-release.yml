@@ -4,10 +4,6 @@ on:
   # 手动触发
   workflow_dispatch:
     inputs:
-      sales_list:
-        description: '销售列表 (逗号分隔，留空则打包所有)'
-        required: false
-        default: ''
       version:
         description: '版本号 (留空使用 package.json 中的版本)'
         required: false
@@ -27,30 +23,15 @@ env:
 
 jobs:
   # ============================================================================
-  # 准备工作：获取销售列表和版本信息
+  # 准备工作：获取版本信息
   # ============================================================================
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      sales_matrix: ${{ steps.get-sales.outputs.matrix }}
       version: ${{ steps.get-version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Get sales list
-        id: get-sales
-        run: |
-          if [ -n "${{ github.event.inputs.sales_list }}" ]; then
-            # 使用手动输入的销售列表
-            SALES="${{ github.event.inputs.sales_list }}"
-            SALES_ARRAY=$(echo $SALES | tr ',' '\n' | jq -R . | jq -sc .)
-          else
-            # 自动扫描 frontend/public 中的 *_wxchat.jpg 文件
-            SALES_ARRAY=$(ls frontend/public/*_wxchat.jpg 2>/dev/null | xargs -I {} basename {} | sed 's/_wxchat\.jpg//' | jq -R . | jq -sc .)
-          fi
-          echo "matrix=$SALES_ARRAY" >> $GITHUB_OUTPUT
-          echo "Found sales: $SALES_ARRAY"
 
       - name: Get version
         id: get-version
@@ -158,17 +139,12 @@ jobs:
             dist/backend/sigma-backend-arm64
           retention-days: 1
 
-
   # ============================================================================
-  # 打包 Windows 版本（为每个销售）
+  # 打包 Windows 版本
   # ============================================================================
   package-windows:
     needs: [prepare, build-frontend, build-backend-windows]
     runs-on: windows-latest
-    strategy:
-      matrix:
-        sales: ${{ fromJson(needs.prepare.outputs.sales_matrix) }}
-      fail-fast: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -194,57 +170,30 @@ jobs:
           name: backend-windows
           path: dist/backend/
 
-      - name: Prepare sales QR image
-        run: |
-          $salesName = "${{ matrix.sales }}"
-          $sourcePath = "frontend/public/${salesName}_wxchat.jpg"
-          $destPath = "frontend/dist/sales_wxchat.jpg"
-          
-          if (Test-Path $sourcePath) {
-            Copy-Item $sourcePath $destPath
-            Write-Host "Copied QR image for sales: $salesName"
-          } else {
-            # Try PNG
-            $sourcePath = "frontend/public/${salesName}_wxchat.png"
-            if (Test-Path $sourcePath) {
-              Copy-Item $sourcePath $destPath
-              Write-Host "Copied QR image (PNG) for sales: $salesName"
-            } else {
-              Write-Error "QR image not found for sales: $salesName"
-              exit 1
-            }
-          }
-        shell: pwsh
-
       - name: Build Windows installer
         run: |
           $version = "${{ needs.prepare.outputs.version }}"
-          $salesName = "${{ matrix.sales }}"
-          $artifactName = "Focus-${version}-${salesName}.exe"
+          $artifactName = "Focus-${version}.exe"
           
           npx electron-builder --win --x64 --ia32 --publish never `
-            --config.directories.output="release-$salesName" `
+            --config.directories.output="release" `
             --config.win.artifactName="$artifactName"
         shell: pwsh
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.sales }}
-          path: release-${{ matrix.sales }}/*.exe
+          name: windows-installer
+          path: release/*.exe
           retention-days: 7
 
   # ============================================================================
-  # 打包 Mac 版本（为每个销售）
+  # 打包 Mac 版本
   # ============================================================================
   package-mac:
     needs: [prepare, build-frontend, build-backend-mac]
     runs-on: macos-14
     timeout-minutes: 60
-    strategy:
-      matrix:
-        sales: ${{ fromJson(needs.prepare.outputs.sales_matrix) }}
-      fail-fast: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -272,34 +221,9 @@ jobs:
 
       - name: Prepare backend for packaging
         run: |
-          # 根据架构选择正确的后端
-          # electron-builder 会自动处理多架构
           chmod +x dist/backend/sigma-backend-x64
           chmod +x dist/backend/sigma-backend-arm64
-          
-          # 创建通用后端（用于 x64 打包）
           cp dist/backend/sigma-backend-x64 dist/backend/sigma-backend
-
-      - name: Prepare sales QR image
-        run: |
-          SALES_NAME="${{ matrix.sales }}"
-          SOURCE_PATH="frontend/public/${SALES_NAME}_wxchat.jpg"
-          DEST_PATH="frontend/dist/sales_wxchat.jpg"
-          
-          if [ -f "$SOURCE_PATH" ]; then
-            cp "$SOURCE_PATH" "$DEST_PATH"
-            echo "Copied QR image for sales: $SALES_NAME"
-          else
-            # Try PNG
-            SOURCE_PATH="frontend/public/${SALES_NAME}_wxchat.png"
-            if [ -f "$SOURCE_PATH" ]; then
-              cp "$SOURCE_PATH" "$DEST_PATH"
-              echo "Copied QR image (PNG) for sales: $SALES_NAME"
-            else
-              echo "Error: QR image not found for sales: $SALES_NAME"
-              exit 1
-            fi
-          fi
 
       - name: Build Mac DMG (x64)
         timeout-minutes: 30
@@ -307,17 +231,14 @@ jobs:
           DEBUG: electron-builder
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          SALES_NAME="${{ matrix.sales }}"
-          ARTIFACT_NAME="Focus-${VERSION}-${SALES_NAME}-mac-x64.dmg"
+          ARTIFACT_NAME="Focus-${VERSION}-mac-x64.dmg"
           
-          # 使用 x64 后端
           cp dist/backend/sigma-backend-x64 dist/backend/sigma-backend
           
-          # 重试机制，最多尝试 3 次
           for i in 1 2 3; do
             echo "Attempt $i to build Mac x64 DMG..."
             if npx electron-builder --mac --x64 --publish never \
-              --config.directories.output="release-${SALES_NAME}-mac-x64" \
+              --config.directories.output="release-mac-x64" \
               --config.mac.artifactName="$ARTIFACT_NAME"; then
               echo "Build succeeded on attempt $i"
               break
@@ -337,17 +258,14 @@ jobs:
           DEBUG: electron-builder
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          SALES_NAME="${{ matrix.sales }}"
-          ARTIFACT_NAME="Focus-${VERSION}-${SALES_NAME}-mac-arm64.dmg"
+          ARTIFACT_NAME="Focus-${VERSION}-mac-arm64.dmg"
           
-          # 使用 arm64 后端
           cp dist/backend/sigma-backend-arm64 dist/backend/sigma-backend
           
-          # 重试机制，最多尝试 3 次
           for i in 1 2 3; do
             echo "Attempt $i to build Mac arm64 DMG..."
             if npx electron-builder --mac --arm64 --publish never \
-              --config.directories.output="release-${SALES_NAME}-mac-arm64" \
+              --config.directories.output="release-mac-arm64" \
               --config.mac.artifactName="$ARTIFACT_NAME"; then
               echo "Build succeeded on attempt $i"
               break
@@ -364,12 +282,11 @@ jobs:
       - name: Upload Mac installers
         uses: actions/upload-artifact@v4
         with:
-          name: mac-${{ matrix.sales }}
+          name: mac-installer
           path: |
-            release-${{ matrix.sales }}-mac-x64/*.dmg
-            release-${{ matrix.sales }}-mac-arm64/*.dmg
+            release-mac-x64/*.dmg
+            release-mac-arm64/*.dmg
           retention-days: 7
-
 
   # ============================================================================
   # 收集所有安装包并创建 Release
@@ -379,26 +296,22 @@ jobs:
     runs-on: ubuntu-latest
     if: always() && startsWith(github.ref, 'refs/tags/') && needs.package-windows.result == 'success'
     steps:
-      - name: Download all Windows artifacts
+      - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: windows-*
+          name: windows-installer
           path: release-all/
-          merge-multiple: true
 
-      - name: Download all Mac artifacts
+      - name: Download Mac artifacts
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          pattern: mac-*
+          name: mac-installer
           path: release-all/
-          merge-multiple: true
 
       - name: Flatten Mac artifacts
         run: |
-          # 将子目录中的 DMG 文件移动到根目录
           find release-all -name "*.dmg" -exec mv {} release-all/ \; 2>/dev/null || true
-          # 删除空的子目录
           find release-all -type d -empty -delete 2>/dev/null || true
 
       - name: List all artifacts
@@ -416,12 +329,9 @@ jobs:
             ## Focus v${{ needs.prepare.outputs.version }}
             
             ### 下载说明
-            - Windows 用户：下载对应销售名的 `.exe` 文件
+            - Windows 用户：下载 `.exe` 文件
             - Mac Intel 用户：下载 `*-mac-x64.dmg` 文件
             - Mac Apple Silicon (M1/M2/M3) 用户：下载 `*-mac-arm64.dmg` 文件
-            
-            ### 安装包列表
-            请根据您的销售代表选择对应的安装包。
           files: release-all/*
           draft: true
           prerelease: false
@@ -436,37 +346,33 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     steps:
-      - name: Download all Windows artifacts
+      - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: windows-*
-          path: release-all-sales/
-          merge-multiple: true
+          name: windows-installer
+          path: release-all/
 
-      - name: Download all Mac artifacts
+      - name: Download Mac artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: mac-*
-          path: release-all-sales/
-          merge-multiple: true
+          name: mac-installer
+          path: release-all/
 
       - name: Flatten Mac artifacts
         run: |
-          # 将子目录中的 DMG 文件移动到根目录
-          find release-all-sales -name "*.dmg" -exec mv {} release-all-sales/ \; 2>/dev/null || true
-          # 删除空的子目录
-          find release-all-sales -type d -empty -delete 2>/dev/null || true
+          find release-all -name "*.dmg" -exec mv {} release-all/ \; 2>/dev/null || true
+          find release-all -type d -empty -delete 2>/dev/null || true
 
       - name: List all artifacts
         run: |
           echo "=== All release artifacts ==="
-          ls -la release-all-sales/
+          ls -la release-all/
           echo "=== Total size ==="
-          du -sh release-all-sales/
+          du -sh release-all/
 
       - name: Upload combined release
         uses: actions/upload-artifact@v4
         with:
-          name: release-all-sales-v${{ needs.prepare.outputs.version }}
-          path: release-all-sales/
+          name: release-v${{ needs.prepare.outputs.version }}
+          path: release-all/
           retention-days: 30

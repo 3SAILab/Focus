@@ -1,7 +1,11 @@
 package handlers
 
 import (
+	"log"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -178,4 +182,202 @@ func LightShadowHistoryHandler(c *gin.Context) {
 	}
 
 	c.JSON(200, convertHistoryToResponse(history))
+}
+
+// deleteImageFile 删除图片文件
+func deleteImageFile(imageURL string) {
+	if imageURL == "" {
+		return
+	}
+	
+	log.Printf("尝试删除图片文件，URL: %s", imageURL)
+	
+	// 从 URL 中提取文件名
+	// 数据库中存储的格式可能是:
+	// 1. 相对路径: images/xxx.png
+	// 2. 完整 URL: http://localhost:8080/images/xxx.png
+	// 3. 带斜杠的路径: /images/xxx.png
+	var fileName string
+	
+	if strings.HasPrefix(imageURL, "images/") {
+		// 相对路径格式: images/xxx.png
+		fileName = strings.TrimPrefix(imageURL, "images/")
+	} else if strings.Contains(imageURL, "/images/") {
+		// URL 格式: http://localhost:8080/images/xxx.png 或 /images/xxx.png
+		parts := strings.Split(imageURL, "/images/")
+		if len(parts) > 1 {
+			fileName = parts[len(parts)-1]
+		}
+	}
+	
+	if fileName == "" {
+		log.Printf("无法从 URL 提取文件名: %s", imageURL)
+		return
+	}
+	
+	// 构建完整文件路径
+	filePath := filepath.Join(config.OutputDir, fileName)
+	log.Printf("准备删除文件: %s", filePath)
+	
+	// 删除文件
+	if err := os.Remove(filePath); err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("文件不存在，跳过删除: %s", filePath)
+		} else {
+			log.Printf("删除图片文件失败: %s, 错误: %v", filePath, err)
+		}
+	} else {
+		log.Printf("成功删除文件: %s", filePath)
+	}
+}
+
+// DeleteHistoryHandler 删除历史记录
+// 同时删除数据库记录和 output 目录中的图片文件
+// 不影响生成次数统计
+func DeleteHistoryHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "无效的记录 ID"})
+		return
+	}
+
+	// 查找记录是否存在
+	var history models.GenerationHistory
+	if err := config.DB.First(&history, id).Error; err != nil {
+		c.JSON(404, gin.H{"error": "记录不存在"})
+		return
+	}
+
+	// 删除图片文件
+	deleteImageFile(history.ImageURL)
+
+	// 软删除记录（GORM 会自动设置 deleted_at 字段）
+	if err := config.DB.Delete(&history).Error; err != nil {
+		c.JSON(500, gin.H{"error": "删除记录失败"})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "删除成功"})
+}
+
+// BatchDeleteHistoryHandler 批量删除历史记录
+func BatchDeleteHistoryHandler(c *gin.Context) {
+	var req struct {
+		IDs []uint `json:"ids" binding:"required"`
+	}
+	
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "无效的请求参数"})
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		c.JSON(400, gin.H{"error": "请选择要删除的记录"})
+		return
+	}
+
+	// 先查询要删除的记录，获取图片 URL
+	var histories []models.GenerationHistory
+	config.DB.Where("id IN ?", req.IDs).Find(&histories)
+	
+	// 删除图片文件
+	for _, h := range histories {
+		deleteImageFile(h.ImageURL)
+	}
+
+	// 批量软删除
+	result := config.DB.Delete(&models.GenerationHistory{}, req.IDs)
+	if result.Error != nil {
+		c.JSON(500, gin.H{"error": "删除记录失败"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"message": "删除成功",
+		"deleted": result.RowsAffected,
+	})
+}
+
+// DeleteHistoryByBatchHandler 按批次 ID 删除历史记录
+// 删除同一批次的所有图片记录和文件，不影响生成次数
+func DeleteHistoryByBatchHandler(c *gin.Context) {
+	batchID := c.Param("batch_id")
+	if batchID == "" {
+		c.JSON(400, gin.H{"error": "无效的批次 ID"})
+		return
+	}
+
+	// 查询该批次的所有记录
+	var histories []models.GenerationHistory
+	result := config.DB.Where("batch_id = ?", batchID).Find(&histories)
+	if result.Error != nil {
+		c.JSON(500, gin.H{"error": "查询批次记录失败"})
+		return
+	}
+
+	if len(histories) == 0 {
+		c.JSON(404, gin.H{"error": "批次不存在"})
+		return
+	}
+
+	// 删除图片文件
+	for _, h := range histories {
+		deleteImageFile(h.ImageURL)
+	}
+
+	// 批量软删除
+	deleteResult := config.DB.Where("batch_id = ?", batchID).Delete(&models.GenerationHistory{})
+	if deleteResult.Error != nil {
+		c.JSON(500, gin.H{"error": "删除批次记录失败"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"message": "删除成功",
+		"deleted": deleteResult.RowsAffected,
+	})
+}
+
+// DeleteHistoryByDateHandler 按日期删除历史记录
+func DeleteHistoryByDateHandler(c *gin.Context) {
+	dateStr := c.Param("date")
+	
+	// 解析日期
+	parsedDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "无效的日期格式，请使用 YYYY-MM-DD"})
+		return
+	}
+	
+	startOfDay := parsedDate
+	endOfDay := parsedDate.Add(24 * time.Hour)
+	
+	// 先查询要删除的记录，获取图片 URL
+	var histories []models.GenerationHistory
+	config.DB.Where("created_at >= ? AND created_at < ?", startOfDay, endOfDay).Find(&histories)
+	
+	if len(histories) == 0 {
+		c.JSON(404, gin.H{"error": "该日期没有记录"})
+		return
+	}
+	
+	// 删除图片文件
+	for _, h := range histories {
+		deleteImageFile(h.ImageURL)
+	}
+	
+	// 批量软删除
+	result := config.DB.Where("created_at >= ? AND created_at < ?", startOfDay, endOfDay).
+		Delete(&models.GenerationHistory{})
+	
+	if result.Error != nil {
+		c.JSON(500, gin.H{"error": "删除记录失败"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"message": "删除成功",
+		"deleted": result.RowsAffected,
+	})
 }

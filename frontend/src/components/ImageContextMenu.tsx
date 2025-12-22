@@ -112,7 +112,7 @@ export default function ImageContextMenu({
   // 下载图片
   const handleDownload = async () => {
     try {
-      const defaultFileName = `image_${Date.now()}.png`;
+      const defaultFileName = `image_${Date.now()}.jpg`;
       
       // 检查是否在 Electron 环境中
       if (window.electronAPI?.saveImage) {

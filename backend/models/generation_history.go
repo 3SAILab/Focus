@@ -16,6 +16,7 @@ const (
 )
 
 // GenerationHistory 数据库模型
+// 使用 GORM 的软删除功能，删除时只设置 deleted_at 字段
 type GenerationHistory struct {
 	gorm.Model
 	Prompt         string `json:"prompt"`
@@ -30,6 +31,10 @@ type GenerationHistory struct {
 	BatchIndex *int    `json:"batch_index,omitempty"`              // 批次内序号 (0-3)
 	BatchTotal *int    `json:"batch_total,omitempty"`              // 批次总数 (1-4)
 }
+
+// Note: GORM's gorm.Model already includes DeletedAt field for soft delete
+// When Delete() is called, it sets deleted_at instead of actually deleting the record
+// All queries automatically exclude soft-deleted records
 
 // GenerationHistoryResponse 响应结构体
 type GenerationHistoryResponse struct {

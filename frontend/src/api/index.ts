@@ -381,6 +381,42 @@ export const api = {
     });
   },
 
+  // 删除单条历史记录（软删除）
+  async deleteHistory(id: number): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/history/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // 批量删除历史记录（软删除）
+  async batchDeleteHistory(ids: number[]): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/history/batch-delete`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids }),
+    });
+  },
+
+  // 按日期删除历史记录
+  async deleteHistoryByDate(date: string): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/history/date/${date}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // 按批次 ID 删除历史记录
+  async deleteHistoryByBatch(batchId: string): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/history/batch/${encodeURIComponent(batchId)}`, {
+      method: 'DELETE',
+    });
+  },
+
   // 设置免责声明同意状态
   async setDisclaimerAgreed(agreed: boolean): Promise<Response> {
     const baseUrl = await getCachedApiUrl();
@@ -407,6 +443,30 @@ export const api = {
     return fetch(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, {
       method: 'GET',
     });
+  },
+
+  // 查询余额状态
+  // Requirements: 4.1 - 调用 API 查询账户余额
+  async checkBalance(): Promise<{ lowBalance: boolean }> {
+    try {
+      const baseUrl = await getCachedApiUrl();
+      const response = await fetch(`${baseUrl}/api/balance`, {
+        method: 'GET',
+      });
+      
+      if (!response.ok) {
+        // 查询失败，静默处理，返回非低余额状态
+        console.warn('[API] 余额查询失败:', response.status);
+        return { lowBalance: false };
+      }
+      
+      const data = await response.json();
+      return { lowBalance: data.lowBalance || false };
+    } catch (error) {
+      // 查询失败，静默处理，返回非低余额状态
+      console.warn('[API] 余额查询异常:', error);
+      return { lowBalance: false };
+    }
   },
 
   // 多图生成 - SSE 流式接口

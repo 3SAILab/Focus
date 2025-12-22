@@ -11,10 +11,12 @@ import (
 )
 
 var (
-	// APILogger 专用于 API 日志的记录器（始终启用，用于调试）
+	// APILogger 专用于 API 日志的记录器
 	APILogger     *log.Logger
 	apiLoggerOnce sync.Once
 	apiLogFile    *os.File
+	// apiLogEnabled 控制是否启用 API 日志（默认禁用）
+	apiLogEnabled = false
 )
 
 // isProduction 检查是否为生产环境
@@ -24,9 +26,19 @@ func isProduction() bool {
 	return prod == "true" || prod == "1"
 }
 
-// initAPILogger 初始化 API 日志记录器（始终启用）
+// initAPILogger 初始化 API 日志记录器（默认禁用）
 func initAPILogger() {
 	apiLoggerOnce.Do(func() {
+		// 检查是否启用 API 日志
+		enableLog := os.Getenv("ENABLE_API_LOG")
+		if enableLog == "true" || enableLog == "1" {
+			apiLogEnabled = true
+		}
+		
+		if !apiLogEnabled {
+			return
+		}
+		
 		logDir := os.Getenv("LOG_DIR")
 		if logDir == "" {
 			logDir = "./logs"
@@ -48,10 +60,10 @@ func initAPILogger() {
 	})
 }
 
-// LogAPI 记录 API 日志（始终启用，用于调试 API 请求/响应）
+// LogAPI 记录 API 日志（默认禁用，通过 ENABLE_API_LOG=true 启用）
 func LogAPI(format string, args ...interface{}) {
 	initAPILogger()
-	if APILogger != nil {
+	if apiLogEnabled && APILogger != nil {
 		APILogger.Printf(format, args...)
 	}
 }
@@ -107,10 +119,10 @@ func indexOf(s, substr string) int {
 	return -1
 }
 
-// LogAPIRequest 记录 API 请求详情
+// LogAPIRequest 记录 API 请求详情（默认禁用）
 func LogAPIRequest(method, url string, body interface{}) {
 	initAPILogger()
-	if APILogger == nil {
+	if !apiLogEnabled || APILogger == nil {
 		return
 	}
 	
@@ -134,10 +146,10 @@ func LogAPIRequest(method, url string, body interface{}) {
 	APILogger.Printf("=================================")
 }
 
-// LogAPIResponse 记录 API 响应详情
+// LogAPIResponse 记录 API 响应详情（默认禁用）
 func LogAPIResponse(statusCode int, duration time.Duration, body interface{}, err error) {
 	initAPILogger()
-	if APILogger == nil {
+	if !apiLogEnabled || APILogger == nil {
 		return
 	}
 	

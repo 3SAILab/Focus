@@ -71,7 +71,8 @@ describe('Build Artifact Validation', () => {
       
       expect(fs.existsSync(path.join(electronDir, 'main.js'))).toBe(true);
       expect(fs.existsSync(path.join(electronDir, 'preload.js'))).toBe(true);
-      expect(fs.existsSync(path.join(electronDir, 'tls-manager.js'))).toBe(true);
+      // versionChecker.js is the new module for version checking
+      expect(fs.existsSync(path.join(electronDir, 'versionChecker.js'))).toBe(true);
     });
 
     test('should have package.json with correct build configuration', () => {
@@ -95,7 +96,7 @@ describe('Build Artifact Validation', () => {
       // Linux configuration
       expect(packageJson.build.linux).toBeDefined();
       expect(packageJson.build.linux.target).toBeDefined();
-      expect(packageJson.build.linux.icon).toBe('assets/icon.png');
+      expect(packageJson.build.linux.icon).toBe('assets/focus.ico');
     });
 
     test('should have extraResources configuration for backend', () => {
@@ -360,7 +361,9 @@ describe('Build Artifact Validation', () => {
       const macArtifactName = packageJson.build.mac.artifactName;
       const linuxArtifactName = packageJson.build.linux.artifactName;
       
-      expect(winArtifactName).toBe('${productName}-${version}-${arch}.${ext}');
+      // Windows uses simpler naming without arch
+      expect(winArtifactName).toBe('${productName}-${version}.${ext}');
+      // Mac and Linux include arch in the name
       expect(macArtifactName).toBe('${productName}-${version}-${arch}.${ext}');
       expect(linuxArtifactName).toBe('${productName}-${version}-${arch}.${ext}');
     });

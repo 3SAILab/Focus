@@ -145,9 +145,18 @@ func main() {
 	// 光影融合历史接口
 	r.GET("/history/light-shadow", handlers.LightShadowHistoryHandler)
 	
+	// 历史记录删除接口
+	r.DELETE("/history/:id", handlers.DeleteHistoryHandler)
+	r.POST("/history/batch-delete", handlers.BatchDeleteHistoryHandler)
+	r.DELETE("/history/batch/:batch_id", handlers.DeleteHistoryByBatchHandler)
+	r.DELETE("/history/date/:date", handlers.DeleteHistoryByDateHandler)
+	
 	// 任务管理接口
 	r.GET("/tasks/processing", handlers.GetProcessingTasks)
 	r.GET("/tasks/:id", handlers.GetTaskStatus)
+	
+	// 余额查询接口
+	r.GET("/api/balance", handlers.CheckBalanceHandler)
 
 	// 确定实际使用的端口
 	var actualPort int

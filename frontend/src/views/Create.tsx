@@ -1,12 +1,13 @@
 // src/views/Create.tsx
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronDown, RotateCw, Pencil } from 'lucide-react';
+import { ChevronDown, Trash2 } from 'lucide-react';
 import Lightbox from '../components/Lightbox';
 import ImageCard from '../components/ImageCard';
 import ImageGrid from '../components/ImageGrid';
 import ErrorCard from '../components/ErrorCard';
 import PromptBar from '../components/PromptBar';
+import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import { PageHeader, QuotaErrorHandler } from '../components/common';
 import type { GenerationHistory, GenerationTask, ImageGridItem, GenerateMultiResponse, GenerateResponse } from '../type';
 import { GenerationType } from '../type';
@@ -17,6 +18,16 @@ import { useToast } from '../context/ToastContext';
 import { useGlobalTask } from '../context/GlobalTaskContext';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useTaskRecovery } from '../hooks/useTaskRecovery';
+
+// 删除目标类型
+interface DeleteTarget {
+  type: 'single' | 'batch' | 'failed' | 'session-batch';
+  item?: GenerationHistory;
+  batchId?: string;
+  items?: GenerationHistory[];
+  failedId?: string;
+  message: string;
+}
 
 // 失败记录类型
 interface FailedGeneration {
@@ -56,6 +67,10 @@ export default function Create() {
   const [showContact, setShowContact] = useState(false);
   const [failedGenerations, setFailedGenerations] = useState<FailedGeneration[]>([]);
   const [currentPrompt, setCurrentPrompt] = useState(''); // 记录当前正在生成的提示词
+  
+  // 删除确认状态
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // 多图生成状态 (Requirements: 5.1, 5.2, 5.3)
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
@@ -435,7 +450,8 @@ export default function Create() {
       batchId: response.batch_id,
       images: response.images.map((img, index) => ({
         url: img.image_url,
-        error: img.error,
+        // 如果有错误，使用 getErrorMessage 过滤敏感信息
+        error: img.error ? getErrorMessage(img.error).message : undefined,
         isLoading: false,
         index,
       })),
@@ -703,6 +719,72 @@ export default function Create() {
     }
   };
 
+  // 点击删除单条历史记录 - 显示确认对话框
+  const handleDeleteSingleClick = (item: GenerationHistory) => {
+    if (!item.id) {
+      toast.error('无法删除：记录 ID 不存在');
+      return;
+    }
+    setDeleteTarget({
+      type: 'single',
+      item,
+      message: '确定要删除这条记录吗？删除后无法恢复，但不会影响生成次数统计。',
+    });
+  };
+
+  // 点击删除批次记录 - 显示确认对话框
+  const handleDeleteBatchClick = (batchId: string, items: GenerationHistory[]) => {
+    const count = items.length;
+    setDeleteTarget({
+      type: 'batch',
+      batchId,
+      items,
+      message: `确定要删除这批 ${count} 张图片吗？删除后无法恢复，但不会影响生成次数统计。`,
+    });
+  };
+
+  // 点击删除当前会话的失败记录 - 直接删除（无需确认）
+  const handleDeleteFailedRecord = (failedId: string) => {
+    setFailedGenerations(prev => prev.filter(f => f.id !== failedId));
+  };
+
+  // 点击删除当前会话的批次结果 - 直接删除（无需确认）
+  const handleDeleteSessionBatch = (batchId: string) => {
+    setBatchResults(prev => prev.filter(b => b.batchId !== batchId));
+  };
+
+  // 确认删除
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    
+    setIsDeleting(true);
+    try {
+      if (deleteTarget.type === 'single' && deleteTarget.item?.id) {
+        const response = await api.deleteHistory(deleteTarget.item.id);
+        if (response.ok) {
+          toast.success('删除成功');
+          await loadHistory();
+        } else {
+          toast.error('删除失败');
+        }
+      } else if (deleteTarget.type === 'batch' && deleteTarget.batchId) {
+        const response = await api.deleteHistoryByBatch(deleteTarget.batchId);
+        if (response.ok) {
+          toast.success('删除成功');
+          await loadHistory();
+        } else {
+          toast.error('删除失败');
+        }
+      }
+    } catch (error) {
+      console.error('删除失败:', error);
+      toast.error('删除失败');
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
+  };
+
   // SSE 流式生成事件处理
   const handleSSEStart = useCallback((event: SSEStartEvent) => {
     console.log('[Create] SSE Start:', event);
@@ -728,9 +810,11 @@ export default function Create() {
     setStreamingBatch(prev => {
       if (!prev) return prev;
       const newImages = [...prev.images];
+      // 如果有错误，使用 getErrorMessage 过滤敏感信息
+      const errorMessage = event.error ? getErrorMessage(event.error).message : undefined;
       newImages[event.index] = {
         url: event.image_url,
-        error: event.error,
+        error: errorMessage,
         isLoading: false,
         index: event.index,
       };
@@ -750,7 +834,8 @@ export default function Create() {
         ...streamingBatch,
         images: event.images.map((img, index) => ({
           url: img.image_url,
-          error: img.error,
+          // 如果有错误，使用 getErrorMessage 过滤敏感信息
+          error: img.error ? getErrorMessage(img.error).message : undefined,
           isLoading: false,
           index,
         })),
@@ -776,13 +861,17 @@ export default function Create() {
   // 将历史记录按 batch_id 分组
   // 返回一个数组，每个元素是一个"显示项"，可能是单图或多图批次
   interface HistoryDisplayItem {
-    type: 'single' | 'batch';
+    type: 'single' | 'batch' | 'failed' | 'session-batch';
     item?: GenerationHistory;  // 单图时使用
     batchId?: string;          // 批次时使用
     items?: GenerationHistory[]; // 批次时使用
     prompt: string;
-    timestamp: string;
-    refImages?: string;        // 参考图 JSON 字符串（多图批次时使用）
+    timestamp: string | number; // 支持字符串（历史）和数字（当前会话）
+    refImages?: string | string[];  // 参考图（字符串或数组）
+    // 失败记录专用
+    failedRecord?: FailedGeneration;
+    // 当前会话批次专用
+    sessionBatch?: BatchResult;
   }
   
   const groupedHistory = React.useMemo((): HistoryDisplayItem[] => {
@@ -848,8 +937,37 @@ export default function Create() {
       }
     }
     
+    // 添加当前会话的失败记录
+    for (const failed of failedGenerations) {
+      result.push({
+        type: 'failed',
+        prompt: failed.prompt,
+        timestamp: failed.timestamp,
+        failedRecord: failed,
+      });
+    }
+    
+    // 添加当前会话的批次结果
+    for (const batch of batchResults) {
+      result.push({
+        type: 'session-batch',
+        batchId: batch.batchId,
+        prompt: batch.prompt,
+        timestamp: batch.timestamp,
+        refImages: batch.refImages,
+        sessionBatch: batch,
+      });
+    }
+    
+    // 按时间戳排序（统一转换为数字比较）
+    result.sort((a, b) => {
+      const timeA = typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp;
+      const timeB = typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp;
+      return timeA - timeB;
+    });
+    
     return result;
-  }, [history]);
+  }, [history, failedGenerations, batchResults]);
   
   // 使用分组后的历史记录
   const chatHistory = groupedHistory;
@@ -922,7 +1040,15 @@ export default function Create() {
                     className="flex flex-col w-full"
                 >
                     {/* 用户指令气泡 */}
-                    <div className="flex justify-end mb-3 px-2">
+                    <div className="flex justify-end items-center gap-2 mb-3 px-2">
+                        {/* 删除按钮 */}
+                        <button
+                          onClick={() => handleDeleteSingleClick(item)}
+                          className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="删除"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                         <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm max-w-[80%]">
                             {item.type === GenerationType.WHITE_BACKGROUND
                               ? '白底图创作'
@@ -947,7 +1073,7 @@ export default function Create() {
                       <div className="w-full max-w-xl">
                         {isFailedRecord ? (
                           <ErrorCard
-                            errorMessage={item.error_msg || '未知错误'}
+                            errorMessage={getErrorMessage(item.error_msg || '未知错误').message}
                             prompt={item.prompt}
                             onRetry={() => handleRegenerateWithCheck(() => {
                               setPromptUpdateKey(prev => prev + 1);
@@ -993,8 +1119,12 @@ export default function Create() {
                                 let refImageUrls: string[] = [];
                                 try {
                                   if (displayItem.refImages) {
-                                    const parsed = JSON.parse(displayItem.refImages);
-                                    refImageUrls = Array.isArray(parsed) ? parsed : [];
+                                    if (Array.isArray(displayItem.refImages)) {
+                                      refImageUrls = displayItem.refImages;
+                                    } else {
+                                      const parsed = JSON.parse(displayItem.refImages);
+                                      refImageUrls = Array.isArray(parsed) ? parsed : [];
+                                    }
                                   }
                                 } catch (e) {
                                   console.warn('解析参考图失败:', e);
@@ -1025,7 +1155,7 @@ export default function Create() {
                             className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                             title="编辑提示词"
                           >
-                            <Pencil className="w-3.5 h-3.5" />
+                            <span className="text-xs">重新编辑</span>
                           </button>
                           <button
                             onClick={async () => {
@@ -1038,8 +1168,12 @@ export default function Create() {
                                 let refImageUrls: string[] = [];
                                 try {
                                   if (displayItem.refImages) {
-                                    const parsed = JSON.parse(displayItem.refImages);
-                                    refImageUrls = Array.isArray(parsed) ? parsed : [];
+                                    if (Array.isArray(displayItem.refImages)) {
+                                      refImageUrls = displayItem.refImages;
+                                    } else {
+                                      const parsed = JSON.parse(displayItem.refImages);
+                                      refImageUrls = Array.isArray(parsed) ? parsed : [];
+                                    }
                                   }
                                 } catch (e) {
                                   console.warn('解析参考图失败:', e);
@@ -1071,7 +1205,14 @@ export default function Create() {
                             className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
                             title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
                           >
-                            <RotateCw className="w-3.5 h-3.5" />
+                            <span className="text-xs">重新生成</span>
+                          </button>
+                          <button
+                            onClick={() => displayItem.batchId && handleDeleteBatchClick(displayItem.batchId, batchItems)}
+                            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title="删除批次"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                         <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm max-w-[70%]">
@@ -1101,6 +1242,9 @@ export default function Create() {
                             // 解析参考图
                             try {
                               if (displayItem.refImages) {
+                                if (Array.isArray(displayItem.refImages)) {
+                                  return displayItem.refImages;
+                                }
                                 const parsed = JSON.parse(displayItem.refImages);
                                 return Array.isArray(parsed) ? parsed : [];
                               }
@@ -1114,6 +1258,141 @@ export default function Create() {
                       </div>
                     </div>
                   </div>
+              );
+            }
+            
+            // 当前会话的失败记录
+            if (displayItem.type === 'failed' && displayItem.failedRecord) {
+              const failed = displayItem.failedRecord;
+              return (
+                <div key={failed.id} className="flex flex-col w-full fade-in-up mt-8">
+                  <div className="flex justify-end items-center gap-2 mb-3 px-2">
+                    {/* 操作按钮 */}
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => {
+                          setPromptUpdateKey(prev => prev + 1);
+                          setSelectedPrompt(failed.prompt);
+                          setTimeout(scrollToBottom, 100);
+                          toast.success('已填充提示词，可编辑后发送');
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="编辑提示词"
+                      >
+                        <span className="text-xs">编辑</span>
+                      </button>
+                      <button
+                        onClick={() => handleRegenerateWithCheck(() => {
+                          setPromptUpdateKey(prev => prev + 1);
+                          setSelectedPrompt(failed.prompt);
+                          setTimeout(() => setTriggerGenerate(true), 100);
+                        })}
+                        disabled={isTaskRunning}
+                        className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                        title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
+                      >
+                        <span className="text-xs">重新生成</span>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteFailedRecord(failed.id)}
+                        className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="删除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    {/* 提示词气泡 */}
+                    <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm max-w-[70%]">
+                      {failed.prompt}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-start w-full pl-2">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs font-bold">
+                        AI
+                      </div>
+                      <span className="text-xs text-gray-400 font-medium">生成失败</span>
+                    </div>
+                    <div className="w-full max-w-xl">
+                      <ErrorCard
+                        errorMessage={failed.errorMessage}
+                        prompt={failed.prompt}
+                        onRetry={() => handleRegenerateWithCheck(() => {
+                          setPromptUpdateKey(prev => prev + 1);
+                          setSelectedPrompt(failed.prompt);
+                          setTimeout(() => setTriggerGenerate(true), 100);
+                        })}
+                        disabled={isTaskRunning}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            
+            // 当前会话的批次结果
+            if (displayItem.type === 'session-batch' && displayItem.sessionBatch) {
+              const batch = displayItem.sessionBatch;
+              return (
+                <div key={batch.batchId} className="flex flex-col w-full fade-in-up mt-8">
+                  <div className="flex justify-end items-center gap-2 mb-3 px-2">
+                    {/* 操作按钮 */}
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleEditBatchPromptWithRef(batch)}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="编辑提示词"
+                      >
+                        <span className="text-xs">编辑</span>
+                      </button>
+                      <button
+                        onClick={() => handleRegenerateBatchWithRef(batch)}
+                        disabled={isTaskRunning}
+                        className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                        title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
+                      >
+                        <span className="text-xs">重新生成</span>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSessionBatch(batch.batchId)}
+                        className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="删除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    {/* 提示词气泡 */}
+                    <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm max-w-[70%]">
+                      {batch.prompt} ({batch.imageCount}张)
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-start w-full pl-2">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md ${
+                        batch.images.every(img => img.error) ? 'bg-gray-400' : 'bg-red-600 shadow-red-200'
+                      }`}>
+                        AI
+                      </div>
+                      <span className="text-xs text-gray-400 font-medium">
+                        {batch.images.every(img => img.error) 
+                          ? '生成失败' 
+                          : batch.images.some(img => img.error)
+                          ? '部分生成成功'
+                          : 'Focus'}
+                      </span>
+                    </div>
+                    <div className="w-full max-w-xl">
+                      <ImageGrid
+                        images={batch.images}
+                        onImageClick={setLightboxImage}
+                        onUseAsReference={handleUseAsReference}
+                        prompt={batch.prompt}
+                        refImages={batch.refImages}
+                        onRefImageClick={setLightboxImage}
+                      />
+                    </div>
+                  </div>
+                </div>
               );
             }
             
@@ -1220,123 +1499,6 @@ export default function Create() {
                 </div>
               </div>
             )}
-
-            {/* 失败的生成记录 (单图) */}
-            {failedGenerations.map((failed) => (
-              <div key={failed.id} className="flex flex-col w-full fade-in-up mt-8">
-                <div className="flex justify-end items-center gap-2 mb-3 px-2">
-                  {/* 操作按钮 */}
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => {
-                        setPromptUpdateKey(prev => prev + 1);
-                        setSelectedPrompt(failed.prompt);
-                        setTimeout(scrollToBottom, 100);
-                        toast.success('已填充提示词，可编辑后发送');
-                      }}
-                      className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                      title="编辑提示词"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleRegenerateWithCheck(() => {
-                        setPromptUpdateKey(prev => prev + 1);
-                        // 不删除失败记录，保留占位
-                        setSelectedPrompt(failed.prompt);
-                        setTimeout(() => setTriggerGenerate(true), 100);
-                      })}
-                      disabled={isTaskRunning}
-                      className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
-                      title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
-                    >
-                      <RotateCw className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  {/* 提示词气泡 */}
-                  <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm max-w-[70%]">
-                    {failed.prompt}
-                  </div>
-                </div>
-                <div className="flex flex-col items-start w-full pl-2">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs font-bold">
-                      AI
-                    </div>
-                    <span className="text-xs text-gray-400 font-medium">生成失败</span>
-                  </div>
-                  <div className="w-full max-w-xl">
-                    <ErrorCard
-                      errorMessage={failed.errorMessage}
-                      prompt={failed.prompt}
-                      onRetry={() => handleRegenerateWithCheck(() => {
-                        // 不删除失败记录，保留占位
-                        setPromptUpdateKey(prev => prev + 1);
-                        setSelectedPrompt(failed.prompt);
-                        setTimeout(() => setTriggerGenerate(true), 100);
-                      })}
-                      disabled={isTaskRunning}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* 多图批次结果 (Requirements: 5.3, 2.1, 2.2, 2.3) */}
-            {batchResults.map((batch) => (
-              <div key={batch.batchId} className="flex flex-col w-full fade-in-up mt-8">
-                <div className="flex justify-end items-center gap-2 mb-3 px-2">
-                  {/* 操作按钮 */}
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => handleEditBatchPromptWithRef(batch)}
-                      className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                      title="编辑提示词"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleRegenerateBatchWithRef(batch)}
-                      disabled={isTaskRunning}
-                      className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
-                      title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
-                    >
-                      <RotateCw className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  {/* 提示词气泡 */}
-                  <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm max-w-[70%]">
-                    {batch.prompt} ({batch.imageCount}张)
-                  </div>
-                </div>
-                <div className="flex flex-col items-start w-full pl-2">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md ${
-                      batch.images.every(img => img.error) ? 'bg-gray-400' : 'bg-red-600 shadow-red-200'
-                    }`}>
-                      AI
-                    </div>
-                    <span className="text-xs text-gray-400 font-medium">
-                      {batch.images.every(img => img.error) 
-                        ? '生成失败' 
-                        : batch.images.some(img => img.error)
-                        ? '部分生成成功'
-                        : 'Focus'}
-                    </span>
-                  </div>
-                  <div className="w-full max-w-xl">
-                    <ImageGrid
-                      images={batch.images}
-                      onImageClick={setLightboxImage}
-                      onUseAsReference={handleUseAsReference}
-                      prompt={batch.prompt}
-                      refImages={batch.refImages}
-                      onRefImageClick={setLightboxImage}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
             
             {/* 滚动锚点 */}
             <div ref={bottomRef} className="h-4" />
@@ -1397,6 +1559,16 @@ export default function Create() {
           setShowQuotaError(false);
           setShowContact(true);
         }}
+      />
+      
+      {/* 删除确认对话框 */}
+      <DeleteConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteConfirm}
+        title="确认删除"
+        message={deleteTarget?.message || '确定要删除这条记录吗？'}
+        isDeleting={isDeleting}
       />
     </>
   );

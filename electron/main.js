@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+const versionChecker = require('./versionChecker');
 
 // 创建中文菜单
 function createChineseMenu() {
@@ -101,7 +102,7 @@ function createChineseMenu() {
               type: 'info',
               title: '关于 Focus',
               message: 'Focus AI 图像生成工具',
-              detail: `版本: ${app.getVersion()}\n\n© 2025 希革马（宁波市）人工智能有限责任公司\n保留所有权利\n\n本软件最终解释权归希革马（宁波市）人工智能有限责任公司所有\n\n内部测试版`,
+              detail: `版本: ${app.getVersion()}\n\n© 2025 希革马（宁波市）人工智能有限责任公司\n保留所有权利\n\n本软件最终解释权归希革马（宁波市）人工智能有限责任公司所有\n\nbeta版`,
               buttons: ['确定']
             });
           }
@@ -967,11 +968,18 @@ ipcMain.handle('save-image', async (event, { imageData, defaultFileName }) => {
   
   try {
     // 显示保存对话框让用户选择保存位置
+    // 默认使用 jpg 格式
+    let fileName = defaultFileName || `image_${Date.now()}.jpg`;
+    // 如果文件名是 png 格式，改为 jpg
+    if (fileName.endsWith('.png')) {
+      fileName = fileName.replace('.png', '.jpg');
+    }
+    
     const result = await dialog.showSaveDialog(mainWindow, {
       title: '保存图片',
-      defaultPath: defaultFileName || `image_${Date.now()}.png`,
+      defaultPath: fileName,
       filters: [
-        { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+        { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'webp'] },
         { name: '所有文件', extensions: ['*'] }
       ]
     });
@@ -1016,6 +1024,90 @@ ipcMain.handle('save-image', async (event, { imageData, defaultFileName }) => {
     return { success: true, filePath: result.filePath };
   } catch (error) {
     console.error('[IPC] save-image: 保存失败', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Version check IPC handlers
+// Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 3.3
+
+/**
+ * Get local version info from package.json
+ * IPC Channel: get-version-info
+ */
+ipcMain.handle('get-version-info', () => {
+  try {
+    const packageJsonPath = path.join(__dirname, '..', 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    
+    const versionInfo = {
+      versionCode: packageJson.versionCode || '',
+      versionName: packageJson.version || ''
+    };
+    
+    console.log('[IPC] get-version-info 请求，返回:', versionInfo);
+    return versionInfo;
+  } catch (error) {
+    console.error('[IPC] get-version-info 错误:', error.message);
+    return {
+      versionCode: '',
+      versionName: ''
+    };
+  }
+});
+
+/**
+ * Perform version check against remote server
+ * IPC Channel: check-update
+ * Returns: VersionCheckResult
+ */
+ipcMain.handle('check-update', async () => {
+  console.log('[IPC] check-update 请求开始');
+  
+  try {
+    // Get local version info
+    const packageJsonPath = path.join(__dirname, '..', 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    
+    const localVersion = {
+      versionCode: packageJson.versionCode || '',
+      versionName: packageJson.version || ''
+    };
+    
+    console.log('[IPC] 本地版本:', localVersion);
+    
+    // Perform version check
+    const result = await versionChecker.performVersionCheck(localVersion);
+    
+    console.log('[IPC] check-update 结果:', result.status);
+    return result;
+  } catch (error) {
+    console.error('[IPC] check-update 错误:', error.message);
+    return {
+      status: 'fetch_error',
+      errorMessage: `版本检查失败: ${error.message}`
+    };
+  }
+});
+
+/**
+ * Open download URL in default browser
+ * IPC Channel: open-download-url
+ */
+ipcMain.handle('open-download-url', async (event, url) => {
+  console.log('[IPC] open-download-url 请求，URL:', url);
+  
+  if (!url) {
+    console.error('[IPC] open-download-url: URL 为空');
+    return { success: false, error: '下载链接为空' };
+  }
+  
+  try {
+    await shell.openExternal(url);
+    console.log('[IPC] open-download-url: 已打开浏览器');
+    return { success: true };
+  } catch (error) {
+    console.error('[IPC] open-download-url 错误:', error.message);
     return { success: false, error: error.message };
   }
 });

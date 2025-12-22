@@ -70,7 +70,7 @@ export default function LightShadow() {
       setShowQuotaError(true);
     } else {
       const { message } = getErrorMessage(errorMsg);
-      toast.error('生成失败: ' + message);
+      toast.error(message);
     }
   }, [toast]);
 

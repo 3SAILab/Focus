@@ -32,15 +32,15 @@ export default function ContactModal({
     >
       {/* 微信二维码 */}
       <div className="text-center">
-        <div className="text-sm text-gray-600 mb-4">扫码联系销售获取更多配额</div>
+        <div className="text-sm text-gray-600 mb-4">扫码联系客服获取更多配额</div>
         <div className="inline-block p-3 bg-white rounded-xl border border-gray-200 shadow-sm">
           <img 
-            src="./dyf_wxchat.jpg" 
-            alt="销售微信二维码" 
+            src="./kefu.png" 
+            alt="客服微信二维码" 
             className="w-48 h-48 object-contain"
           />
         </div>
-        <div className="mt-4 text-xs text-gray-400">微信扫一扫，添加销售顾问</div>
+        <div className="mt-4 text-xs text-gray-400">微信扫一扫，添加客服顾问</div>
       </div>
     </Modal>
   );

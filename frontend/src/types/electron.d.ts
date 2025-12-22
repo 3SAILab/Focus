@@ -14,6 +14,33 @@ export interface SaveImageResult {
   error?: string;
 }
 
+// Version Check Types
+export interface LocalVersionInfo {
+  versionCode: string;
+  versionName: string;
+}
+
+export interface RemoteVersionInfo {
+  versionCode: string;
+  versionName: string;
+  updateContent: string;
+  windowsUrl: string;
+  macX64Url: string;
+  macArm64Url: string;
+}
+
+export interface VersionCheckResult {
+  status: 'network_error' | 'fetch_error' | 'update_required' | 'up_to_date';
+  remoteVersion?: RemoteVersionInfo;
+  downloadUrl?: string;
+  errorMessage?: string;
+}
+
+export interface OpenUrlResult {
+  success: boolean;
+  error?: string;
+}
+
 export interface ElectronAPI {
   /**
    * 获取后端服务 URL
@@ -60,6 +87,27 @@ export interface ElectronAPI {
    * @returns 清理函数，用于移除事件监听器
    */
   onBackendError: (callback: (error: string) => void) => () => void;
+  
+  // ===== Version Check APIs =====
+  
+  /**
+   * 获取本地版本信息
+   * @returns Promise<LocalVersionInfo> 本地版本信息 (versionCode, versionName)
+   */
+  getVersionInfo: () => Promise<LocalVersionInfo>;
+  
+  /**
+   * 检查更新
+   * @returns Promise<VersionCheckResult> 版本检查结果
+   */
+  checkUpdate: () => Promise<VersionCheckResult>;
+  
+  /**
+   * 在默认浏览器中打开下载链接
+   * @param url 下载链接
+   * @returns Promise<OpenUrlResult> 操作结果
+   */
+  openDownloadUrl: (url: string) => Promise<OpenUrlResult>;
 }
 
 declare global {

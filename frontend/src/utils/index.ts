@@ -74,7 +74,12 @@ export function formatDate(dateString: string): string {
  */
 export async function downloadImage(url: string): Promise<boolean> {
   try {
-    const fileName = url.split('/').pop() || `image_${Date.now()}.png`;
+    // 从 URL 提取文件名，如果没有则使用默认的 jpg 格式
+    let fileName = url.split('/').pop() || `image_${Date.now()}.jpg`;
+    // 如果文件名是 png 格式，改为 jpg
+    if (fileName.endsWith('.png')) {
+      fileName = fileName.replace('.png', '.jpg');
+    }
     
     // 检查是否在 Electron 环境中
     if (window.electronAPI?.saveImage) {
@@ -120,7 +125,7 @@ export async function loadImageAsFile(url: string): Promise<File | null> {
   try {
     const response = await fetch(url);
     const blob = await response.blob();
-    const fileName = url.split('/').pop() || 'ref_image.png';
+    const fileName = url.split('/').pop() || 'ref_image.jpg';
     return new File([blob], fileName, { type: blob.type });
   } catch (error) {
     console.error('加载图片失败:', error);
