@@ -9,8 +9,8 @@ import (
 	"sigma/utils"
 )
 
-// TaskTimeoutDuration 任务超时时间（5分钟）
-const TaskTimeoutDuration = 5 * time.Minute
+// TaskTimeoutDuration 任务超时时间（15分钟）
+const TaskTimeoutDuration = 15 * time.Minute
 
 // GetProcessingTasks 获取正在处理的任务
 // GET /tasks/processing?type=create

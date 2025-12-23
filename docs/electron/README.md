@@ -8,9 +8,8 @@ Focus 使用 Electron 33.x 作为桌面应用框架，管理窗口、后端进�
 electron/
 ├── main.js              # 主进程入口
 ├── preload.js           # 预加载脚本
-├── tls-manager.js       # TLS 证书管理
+├── versionChecker.js    # 版本检测模块
 ├── main.test.js         # 主进程测试
-├── tls-manager.test.js  # TLS 管理器测试
 ├── e2e.test.js          # 端到端测试
 └── build-validation.test.js  # 构建验证测试
 ```
@@ -21,9 +20,10 @@ electron/
 
 1. **窗口管理**：创建和管理 BrowserWindow
 2. **后端进程管理**：启动、监控和终止 Go 后端
-3. **TLS 证书管理**：生成和管理自签名证书
+3. **版本检测**：检查更新并提示用户下载
 4. **IPC 通信**：处理渲染进程的请求
 5. **环境配置**：设置后端运行环境
+6. **自动端口发现**：支持端口自动切换
 
 ### 生命周期
 
@@ -33,13 +33,15 @@ sequenceDiagram
     participant Main as 主进程
     participant Backend as Go 后端
     participant Window as BrowserWindow
+    participant Version as 版本检测
     
     App->>Main: app.whenReady()
-    Main->>Main: 生成 TLS 证书
     Main->>Backend: 启动后端进程
     Backend-->>Main: 端口就绪
     Main->>Window: 创建窗口
     Window->>Window: 加载前端
+    Main->>Version: 检查版本更新
+    Version-->>Window: 显示更新提示（如有）
     
     Note over Main,Window: 应用运行中
     
@@ -87,6 +89,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  checkVersion: () => ipcRenderer.invoke('check-version'),
+  openDownloadUrl: (url) => ipcRenderer.invoke('open-download-url', url),
+  saveImage: (options) => ipcRenderer.invoke('save-image', options),
+  copyImageToClipboard: (base64Data) => ipcRenderer.invoke('copy-image-to-clipboard', base64Data),
 });
 ```
 
@@ -96,30 +103,46 @@ contextBridge.exposeInMainWorld('electronAPI', {
 - 禁用 `nodeIntegration`：渲染进程无法直接访问 Node.js
 - 使用 `contextBridge`：安全地暴露有限的 API
 
-## TLS 管理器 (tls-manager.js)
+## 版本检测 (versionChecker.js)
 
 ### 职责
 
-生成和管理自签名 TLS 证书，用于后端 HTTPS 通信。
+检查远程版本信息，自动识别平台并提供正确的下载链接。
 
 ### 功能
 
 ```javascript
-const { generateCertificate, ensureCertificates } = require('./tls-manager');
+const { performVersionCheck, getDownloadUrl } = require('./versionChecker');
 
-// 确保证书存在（不存在则生成）
-await ensureCertificates(certDir);
+// 执行版本检查
+const result = await performVersionCheck({ versionCode, versionName });
+// result.status: 'up_to_date' | 'update_required' | 'network_error' | 'fetch_error'
 
-// 强制重新生成证书
-await generateCertificate(certDir);
+// 获取下载链接（自动识别平台）
+const url = getDownloadUrl(versionInfo);
+// Windows: windowsUrl
+// Mac Intel: macX64Url
+// Mac M1/M2: macArm64Url
 ```
 
-### 证书配置
+### 平台自动识别
 
-- **有效期**：365 天
-- **密钥长度**：2048 位
-- **算法**：RSA + SHA256
-- **主题**：localhost
+- **Windows** (`process.platform === 'win32'`) → `windowsUrl`
+- **Mac Intel** (`process.platform === 'darwin' && process.arch === 'x64'`) → `macX64Url`
+- **Mac M1/M2** (`process.platform === 'darwin' && process.arch === 'arm64'`) → `macArm64Url`
+
+### 版本信息格式 (version.json)
+
+```json
+{
+  "versionCode": "202512221621",
+  "versionName": "1.0.2",
+  "updateContent": "1. 添加删除功能\n2. 优化了用户体验",
+  "windowsUrl": "https://example.com/Focus-1.0.2.zip",
+  "macX64Url": "https://example.com/Focus-1.0.2-x64.dmg",
+  "macArm64Url": "https://example.com/Focus-1.0.2-arm64.dmg"
+}
+```
 
 ## IPC 通信
 
@@ -130,7 +153,24 @@ const { ipcMain } = require('electron');
 
 // 获取后端 URL
 ipcMain.handle('get-backend-url', () => {
-  return `https://localhost:${backendPort}`;
+  return `http://localhost:${backendPort}`;
+});
+
+// 获取应用版本
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
+// 检查版本更新
+ipcMain.handle('check-version', async () => {
+  const localVersion = { versionCode, versionName };
+  return await performVersionCheck(localVersion);
+});
+
+// 打开下载链接
+ipcMain.handle('open-download-url', async (event, url) => {
+  await shell.openExternal(url);
+  return { success: true };
 });
 ```
 
@@ -153,11 +193,10 @@ function startBackend() {
   const env = {
     ...process.env,
     PORT: '8080',
+    AUTO_PORT_DISCOVERY: 'true',
     OUTPUT_DIR: path.join(userDataPath, 'output'),
     UPLOAD_DIR: path.join(userDataPath, 'uploads'),
     DB_PATH: path.join(userDataPath, 'db', 'history.db'),
-    TLS_CERT_PATH: path.join(userDataPath, 'certs', 'cert.pem'),
-    TLS_KEY_PATH: path.join(userDataPath, 'certs', 'key.pem'),
     PRODUCTION: 'true',
   };
 
@@ -257,20 +296,21 @@ npm run test:build
 ### 后端日志
 
 - 开发模式：输出到控制台
-- 生产模式：输出到 `logs/app.log`
+- 生产模式：输出到 `data/logs/app.log`
 
 ## 常见问题
 
 ### 后端启动失败
 
 1. 检查后端可执行文件是否存在
-2. 检查端口是否被占用
+2. 检查端口是否被占用（支持自动端口切换）
 3. 查看后端日志
 
-### 证书错误
+### 版本检测失败
 
-1. 删除 `certs/` 目录
-2. 重启应用，自动重新生成
+1. 检查网络连接
+2. 检查 version.json 是否可访问
+3. 查看控制台错误信息
 
 ### 窗口空白
 

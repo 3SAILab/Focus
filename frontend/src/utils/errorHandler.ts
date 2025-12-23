@@ -23,11 +23,11 @@ export interface ParsedError {
 
 /**
  * 配额/余额不足错误检测关键词
+ * 注意：不要添加 'exceeded' 单独作为关键词，因为超时错误也包含这个词
  */
 const QUOTA_KEYWORDS = [
   'quota',
   'limit',
-  'exceeded',
   'exhausted',
   'insufficient',
   'balance',
@@ -40,6 +40,7 @@ const QUOTA_KEYWORDS = [
 
 /**
  * 配额错误检测正则模式
+ * 这些模式更精确，避免误判超时等其他错误
  */
 const QUOTA_PATTERNS = [
   /token\s*quota/i,
@@ -47,6 +48,8 @@ const QUOTA_PATTERNS = [
   /RemainQuota\s*=\s*0/i,
   /insufficient\s*(quota|balance)/i,
   /balance\s*(is\s*)?(not\s*enough|insufficient)/i,
+  /limit\s*(is\s*)?(exceeded|reached)/i,
+  /rate\s*limit/i,
 ];
 
 /**

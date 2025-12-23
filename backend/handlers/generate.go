@@ -178,8 +178,8 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
 
-	// 设置超时时间为 270 秒（4.5分钟）
-	client := &http.Client{Timeout: 270 * time.Second}
+	// 设置超时时间为 840 秒（14分钟）
+	client := &http.Client{Timeout: 840 * time.Second}
 	
 	// 记录请求开始时间
 	requestStartTime := time.Now()
@@ -520,8 +520,8 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
 
-	// 设置超时时间为 270 秒
-	client := &http.Client{Timeout: 270 * time.Second}
+	// 设置超时时间为 840 秒（14分钟）
+	client := &http.Client{Timeout: 840 * time.Second}
 	
 	utils.LogAPI("开始 AI API 请求 (图片 %d)...", index+1)
 	requestStartTime := time.Now()

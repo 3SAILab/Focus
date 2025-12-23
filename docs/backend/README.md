@@ -27,20 +27,19 @@ backend/
 ├── handlers/            # HTTP 处理器
 │   ├── config.go        # 配置接口
 │   ├── generate.go      # 生成接口
-│   ├── history.go       # 历史接口
+│   ├── history.go       # 历史接口（含批量删除）
 │   ├── stats.go         # 统计接口
 │   └── task.go          # 任务接口
 ├── models/              # 数据模型
 │   ├── generation_history.go
 │   ├── generation_stats.go
 │   └── generation_task.go
-├── server/              # 服务器配置（已废弃，使用 HTTP）
 ├── types/               # 类型定义
 │   └── ai_types.go      # AI API 类型
 └── utils/               # 工具函数
     ├── env.go           # 环境变量工具
     ├── logger.go        # 日志工具
-    └── port.go          # 端口管理
+    └── port.go          # 端口管理（自动端口发现）
 ```
 
 ## 开发环境

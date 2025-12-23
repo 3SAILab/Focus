@@ -29,16 +29,21 @@ frontend/src/
 │   │   └── QuotaErrorHandler.tsx
 │   ├── ApiKeyModal.tsx
 │   ├── ContactModal.tsx
+│   ├── DeleteConfirmDialog.tsx
 │   ├── DisclaimerModal.tsx
 │   ├── ImageCard.tsx
 │   ├── ImageContextMenu.tsx
 │   ├── Lightbox.tsx
 │   ├── PlaceholderCard.tsx
 │   ├── PromptBar.tsx
+│   ├── SalesModal.tsx
+│   ├── UpdateModal.tsx
 │   └── ...
 ├── context/             # React Context
 │   ├── ConfigContext.tsx
-│   └── ToastContext.tsx
+│   ├── ToastContext.tsx
+│   ├── GlobalTaskContext.tsx
+│   └── VersionContext.tsx
 ├── hooks/               # 自定义 Hooks
 │   ├── useDragDrop.ts
 │   ├── useImageUpload.ts

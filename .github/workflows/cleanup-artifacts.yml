@@ -9,60 +9,52 @@ on:
 
 permissions:
   actions: write
+  contents: read
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
       - name: Delete all artifacts using GitHub CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "=== Listing all artifacts ==="
+          echo "=== Deleting all artifacts from $REPO ==="
           
           # 获取所有 artifacts 并删除
-          ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/artifacts --paginate -q '.artifacts[].id')
+          ARTIFACTS=$(gh api repos/$REPO/actions/artifacts --paginate -q '.artifacts[].id' 2>/dev/null || echo "")
           
           if [ -z "$ARTIFACTS" ]; then
             echo "No artifacts found"
-            exit 0
+          else
+            COUNT=0
+            for ID in $ARTIFACTS; do
+              echo "Deleting artifact ID: $ID"
+              gh api -X DELETE repos/$REPO/actions/artifacts/$ID 2>/dev/null || true
+              COUNT=$((COUNT + 1))
+            done
+            echo "Deleted $COUNT artifacts"
           fi
-          
-          COUNT=0
-          for ID in $ARTIFACTS; do
-            echo "Deleting artifact ID: $ID"
-            gh api -X DELETE repos/${{ github.repository }}/actions/artifacts/$ID || true
-            COUNT=$((COUNT + 1))
-          done
-          
-          echo ""
-          echo "=== Summary ==="
-          echo "Deleted $COUNT artifacts"
           
       - name: Delete old workflow runs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           echo "=== Deleting old workflow runs ==="
           
-          # 保留最近 2 次运行，删除其他的
-          RUNS=$(gh run list --limit 200 --json databaseId -q '.[2:][].databaseId')
+          # 保留最近 5 次运行，删除其他的
+          RUNS=$(gh api repos/$REPO/actions/runs --paginate -q '.workflow_runs[5:][].id' 2>/dev/null || echo "")
           
           if [ -z "$RUNS" ]; then
             echo "No old runs to delete"
-            exit 0
+          else
+            COUNT=0
+            for ID in $RUNS; do
+              echo "Deleting run ID: $ID"
+              gh api -X DELETE repos/$REPO/actions/runs/$ID 2>/dev/null || true
+              COUNT=$((COUNT + 1))
+            done
+            echo "Deleted $COUNT workflow runs"
           fi
-          
-          COUNT=0
-          for ID in $RUNS; do
-            echo "Deleting run ID: $ID"
-            gh run delete $ID || true
-            COUNT=$((COUNT + 1))
-          done
-          
-          echo ""
-          echo "=== Summary ==="
-          echo "Deleted $COUNT workflow runs"

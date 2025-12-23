@@ -80,7 +80,7 @@ const getCachedApiUrl = async (): Promise<string> => {
 const fetchWithTimeout = async (
   url: string,
   options: RequestInit,
-  timeoutMs: number = 300000 // 默认 5 分钟超时
+  timeoutMs: number = 900000 // 默认 15 分钟超时
 ): Promise<Response> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

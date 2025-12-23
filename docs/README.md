@@ -12,7 +12,9 @@ Focus 是一款基于 AI 的图片生成桌面应用，支持多种电商场景�
 - **商品图生成**: 产品场景图生成
 - **光影融合**: 产品光影效果处理
 - **任务恢复**: 页面刷新后自动恢复进行中的任务
-- **历史记录**: 完整的生成历史管理
+- **历史记录**: 完整的生成历史管理，支持批量删除
+- **版本更新**: 自动检测新版本，支持 Windows/Mac 平台自动识别
+- **图片导出**: 支持 JPG 格式保存和复制
 
 ## 技术栈
 
@@ -34,13 +36,13 @@ focus/
 ├── electron/                 # Electron 主进程
 │   ├── main.js              # 主进程入口
 │   ├── preload.js           # 预加载脚本
-│   └── tls-manager.js       # TLS 证书管理
+│   └── versionChecker.js    # 版本检测模块
 ├── frontend/                 # React 前端
 │   ├── src/
 │   │   ├── api/             # API 客户端
 │   │   ├── components/      # React 组件
 │   │   │   └── common/      # 公共组件
-│   │   ├── context/         # React Context（含 GlobalTaskContext）
+│   │   ├── context/         # React Context（含 GlobalTaskContext, VersionContext）
 │   │   ├── hooks/           # 自定义 Hooks（含 useTaskRecovery）
 │   │   ├── layout/          # 布局组件
 │   │   ├── router/          # 路由配置
@@ -53,7 +55,6 @@ focus/
 │   ├── handlers/            # HTTP 处理器
 │   ├── models/              # 数据模型（含异步任务模型）
 │   ├── config/              # 配置管理
-│   ├── server/              # TLS 服务器
 │   └── utils/               # 工具函数
 ├── assets/                   # 应用图标
 ├── build/                    # 构建配置
@@ -64,6 +65,7 @@ focus/
 │   ├── electron/            # Electron 文档
 │   └── ui/                  # UI 文档
 ├── .github/workflows/        # GitHub Actions 工作流
+├── version.json             # 版本信息（用于自动更新）
 └── release*/                 # 打包输出
 ```
 

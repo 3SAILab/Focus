@@ -55,11 +55,13 @@ graph TB
 |------|------|
 | `main.js` | 主进程入口，管理窗口、后端进程、IPC 通信 |
 | `preload.js` | 预加载脚本，暴露安全的 API 给渲染进程 |
+| `versionChecker.js` | 版本检测模块，自动识别平台并提供下载链接 |
 
 **主要功能：**
 - 创建和管理 BrowserWindow
 - 启动和监控后端进程
 - 自动端口发现和管理
+- 版本更新检测
 - 提供 IPC 通信桥接
 
 ### 2. React 前端层
@@ -71,7 +73,7 @@ graph TB
 | `views/` | 页面级组件（Create, WhiteBackground, History 等） |
 | `components/` | 可复用 UI 组件 |
 | `components/common/` | 通用组件（按钮、模态框、上传区等） |
-| `context/` | React Context 状态管理 |
+| `context/` | React Context 状态管理（含 VersionContext） |
 | `hooks/` | 自定义 Hooks |
 | `api/` | API 客户端封装 |
 | `router/` | 路由配置 |
@@ -79,8 +81,9 @@ graph TB
 **主要功能：**
 - 图片上传和预览
 - 提示词输入和生成控制
-- 历史记录展示
+- 历史记录展示和批量删除
 - 任务状态恢复
+- 版本更新提示
 
 ### 3. Go 后端层
 
@@ -91,14 +94,15 @@ graph TB
 | `handlers/` | HTTP 请求处理器 |
 | `models/` | 数据库模型定义 |
 | `config/` | 配置管理 |
-| `server/` | TLS 服务器配置 |
-| `utils/` | 工具函数 |
+| `utils/` | 工具函数（含端口管理） |
 
 **主要功能：**
 - 接收生成请求并调用 Gemini API
 - 管理生成历史和任务状态
+- 支持批量删除历史记录
 - 提供静态文件服务
 - 配置和统计管理
+- 自动端口发现
 
 ## 通信流程
 
@@ -223,13 +227,13 @@ stateDiagram-v2
 │   ├── type/          → 类型定义
 │   ├── utils/         → 工具函数
 │   └── views/         → 页面视图
-└── backend/            → Go 后端层
-    ├── handlers/      → HTTP 处理器
-    ├── models/        → 数据模型
-    ├── config/        → 配置管理
-    ├── server/        → TLS 服务器
-    ├── types/         → AI 类型定义
-    └── utils/         → 工具函数
+├── backend/            → Go 后端层
+│   ├── handlers/      → HTTP 处理器
+│   ├── models/        → 数据模型
+│   ├── config/        → 配置管理
+│   ├── types/         → AI 类型定义
+│   └── utils/         → 工具函数
+└── version.json        → 版本信息（用于自动更新）
 ```
 
 ## 扩展点

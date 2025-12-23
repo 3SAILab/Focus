@@ -182,41 +182,42 @@ C:\Program Files\Focus\
 
 ### 用户数据目录
 
+Windows 安装后数据存储在安装目录下：
+
 ```
-%APPDATA%\Focus\
+安装目录/data/
 ├── db/
 │   ├── history.db              # 数据库
 │   └── config.json             # 配置文件
 ├── output/                     # 生成的图片
 ├── uploads/                    # 上传的文件
-├── certs/                      # TLS 证书
-│   ├── cert.pem
-│   └── key.pem
 ├── logs/                       # 日志文件
 └── temp/                       # 临时文件
 ```
 
-## TLS 证书管理
+## 版本更新机制
 
-### 自动生成
+### version.json 配置
 
-首次启动时，Electron 主进程自动生成自签名证书：
+在 OSS 上维护 `version.json` 文件：
 
-```javascript
-const { ensureCertificates } = require('./tls-manager');
-await ensureCertificates(path.join(userDataPath, 'certs'));
+```json
+{
+  "versionCode": "202512221621",
+  "versionName": "1.0.2",
+  "updateContent": "1. 添加删除功能\n2. 优化了用户体验",
+  "windowsUrl": "https://example.com/Focus-1.0.2.zip",
+  "macX64Url": "https://example.com/Focus-1.0.2-x64.dmg",
+  "macArm64Url": "https://example.com/Focus-1.0.2-arm64.dmg"
+}
 ```
 
-### 证书参数
+### 平台自动识别
 
-- **有效期**：365 天
-- **密钥长度**：2048 位
-- **主题**：CN=localhost
-- **用途**：服务器认证
-
-### 证书更新
-
-删除 `certs/` 目录后重启应用，会自动重新生成。
+应用启动时自动检测平台并提供正确的下载链接：
+- Windows → `windowsUrl`
+- Mac Intel → `macX64Url`
+- Mac M1/M2 → `macArm64Url`
 
 ## 故障排除
 
@@ -265,14 +266,8 @@ electron-builder failed
 
 **检查：**
 1. 后端可执行文件是否存在
-2. 端口是否被占用
+2. 端口是否被占用（支持自动端口切换）
 3. 查看日志文件
-
-### 应用启动失败：证书错误
-
-**解决：**
-1. 删除用户数据目录下的 `certs/` 文件夹
-2. 重启应用
 
 ## 代码签名
 
@@ -308,11 +303,15 @@ npm run build:electron
 ## 发布检查清单
 
 - [ ] 更新 `package.json` 版本号
+- [ ] 更新 `version.json` 版本信息和下载链接
 - [ ] 准备所有平台图标
 - [ ] 运行完整构建 `npm run build`
 - [ ] 测试安装程序
 - [ ] 测试应用功能
+- [ ] 测试版本更新提示
 - [ ] 检查日志无错误
+- [ ] 上传安装包到 OSS
+- [ ] 更新 OSS 上的 version.json
 - [ ] 准备发布说明
 - [ ] （可选）代码签名
 - [ ] （可选）macOS 公证
