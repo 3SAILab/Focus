@@ -81,7 +81,7 @@ export default function LightShadow() {
   }, [handleError]);
 
   // Async generation hook
-  const { isGenerating, startGeneration } = useAsyncGeneration({
+  const { isGenerating, startGeneration, pendingTasks } = useAsyncGeneration({
     onComplete: handleTaskComplete,
     onError: handleError,
   });
@@ -273,7 +273,7 @@ export default function LightShadow() {
             </div>
           </div>
 
-          {/* History section - Requirements: 2.6 - 只有恢复的任务才显示在这里 */}
+          {/* History section */}
           <HistorySection
             title="光影融合历史记录"
             history={history}
@@ -281,6 +281,7 @@ export default function LightShadow() {
             onImagePreview={setLightboxImage}
             emptyText="暂无光影融合记录"
             processingTasks={processingTasks}
+            pendingTasks={pendingTasks}
           />
         </div>
       </div>

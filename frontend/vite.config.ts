@@ -21,7 +21,7 @@ export default defineConfig({
     strictPort: false, // Allow Vite to try next port if 5174 is occupied
   },
   esbuild: {
-    // 生产环境移除 console 和 debugger
-    drop: ['console', 'debugger']
+    // 生产环境移除 debugger，但保留 console 用于调试
+    drop: ['debugger']
   }
 })

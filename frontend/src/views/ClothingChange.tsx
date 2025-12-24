@@ -91,7 +91,7 @@ export default function ClothingChange() {
   }, [handleError]);
 
   // Async generation hook
-  const { isGenerating, startGeneration } = useAsyncGeneration({
+  const { isGenerating, startGeneration, pendingTasks } = useAsyncGeneration({
     onComplete: handleTaskComplete,
     onError: handleError,
   });
@@ -449,7 +449,7 @@ export default function ClothingChange() {
             />
           </div>
 
-          {/* History section - 只有恢复的任务才显示在这里 */}
+          {/* History section */}
           <HistorySection
             title="换装历史记录"
             history={history}
@@ -457,6 +457,7 @@ export default function ClothingChange() {
             onImagePreview={setLightboxImage}
             emptyText="暂无换装生成记录"
             processingTasks={processingTasks}
+            pendingTasks={pendingTasks}
           />
         </div>
       </div>

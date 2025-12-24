@@ -26,6 +26,7 @@ func GetProcessingTasks(c *gin.Context) {
 		query = query.Where("type = ?", taskType)
 	}
 	
+	// 按创建时间降序排列（最新的在前面），确保前端显示顺序一致
 	result := query.Order("created_at desc").Find(&tasks)
 	if result.Error != nil {
 		c.JSON(500, gin.H{"error": "获取处理中任务失败"})

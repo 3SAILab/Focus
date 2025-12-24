@@ -67,6 +67,8 @@ function createChineseMenu() {
         { label: '重新加载', role: 'reload', accelerator: 'CmdOrCtrl+R' },
         { label: '强制重新加载', role: 'forceReload', accelerator: 'CmdOrCtrl+Shift+R' },
         { type: 'separator' },
+        { label: '开发者工具', role: 'toggleDevTools', accelerator: 'F12' },
+        { type: 'separator' },
         { label: '实际大小', role: 'resetZoom', accelerator: 'CmdOrCtrl+0' },
         { label: '放大', role: 'zoomIn', accelerator: 'CmdOrCtrl+Plus' },
         { label: '缩小', role: 'zoomOut', accelerator: 'CmdOrCtrl+-' },
@@ -180,7 +182,7 @@ function initializeLogging() {
   };
 }
 
-// Get backend executable path based on environment
+// Get backend executable path based on environment and architecture
 function getBackendPath() {
   const exeName = process.platform === 'win32' ? 'sigma-backend.exe' : 'sigma-backend';
   
@@ -310,6 +312,8 @@ async function startBackend() {
       DB_PATH: path.join(directories.db, 'history.db'),
       PORT: DEFAULT_BACKEND_PORT.toString(),
       LOG_DIR: directories.logs,
+      // 启用 API 日志记录
+      ENABLE_API_LOG: 'true',
       // 启用自动端口发现
       AUTO_PORT_DISCOVERY: 'true',
       // 生产环境标识（打包后的应用使用生产模型）
@@ -325,6 +329,8 @@ async function startBackend() {
     console.log('  - Output directory:', directories.output);
     console.log('  - Upload directory:', directories.uploads);
     console.log('  - Database directory:', directories.db);
+    console.log('  - Log directory:', directories.logs);
+    console.log('  - API Log: enabled');
     console.log('  - Backend executable:', backendExe);
     console.log('  - Working directory:', backendWorkingDir);
     console.log('  - Port file:', getPortFilePath());
@@ -577,7 +583,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: false,  // 禁用 web 安全策略，解决跨域和本地文件加载问题
-      devTools: isDev,     // 仅在开发模式下启用开发者工具
+      devTools: true,      // 始终启用开发者工具（可通过 F12 或 Ctrl+Shift+I 打开）
     },
   };
   

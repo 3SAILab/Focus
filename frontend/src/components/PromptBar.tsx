@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { ArrowRight, Loader2, Settings, Upload, Grid2X2 } from 'lucide-react';
 import ImageUpload from './ImageUpload';
 import AspectRatioSelector, { aspectRatiosConfig } from './AspectRatioSelector';
@@ -11,6 +11,9 @@ import { useToast } from '../context/ToastContext';
 import { useGlobalTask } from '../context/GlobalTaskContext';
 import { getErrorMessage } from '../utils/errorHandler';
 
+// 防抖间隔（毫秒）- 防止快速双击
+const DEBOUNCE_INTERVAL = 500;
+
 interface PromptBarProps {
   onGenerate: (response: GenerateResponse) => void;
   onGenerateMulti?: (response: GenerateMultiResponse) => void; // 新增：多图生成回调
@@ -19,6 +22,7 @@ interface PromptBarProps {
   onPreviewImage?: (url: string) => void;
   initialPrompt?: string;
   initialFiles?: File[];
+  initialImageCount?: ImageCount; // 新增：初始图片数量（用于重新生成时保留原数量）
   onFilesChange?: (files: File[]) => void; // 新增：用于父子组件文件状态同步
   triggerGenerate?: boolean;
   onTriggered?: () => void;
@@ -28,7 +32,7 @@ interface PromptBarProps {
   onSSEComplete?: (event: SSECompleteEvent) => void;
   // 禁用状态（外部控制，用于创作工坊生成时禁用输入）
   disabled?: boolean;
-  // 异步任务运行状态（外部控制，用于禁用发送按钮直到任务完成）
+  // 异步任务运行状态（外部控制，仅用于显示 loading 图标，不禁用发送）
   isTaskRunning?: boolean;
   // 异步任务创建回调（用于通知父组件任务 ID）
   onTaskCreated?: (taskId: string) => void;
@@ -44,6 +48,7 @@ export default function PromptBar({
   onPreviewImage,
   initialPrompt = '',
   initialFiles = [],
+  initialImageCount = 1,
   onFilesChange,
   triggerGenerate = false,
   onTriggered,
@@ -51,10 +56,14 @@ export default function PromptBar({
   onSSEImage,
   onSSEComplete,
   disabled = false,
-  isTaskRunning = false,
+  // isTaskRunning 保留 prop 但不使用，保持 API 兼容性
+  isTaskRunning: _isTaskRunning = false,
   onTaskCreated,
   promptVersion = 0,
 }: PromptBarProps) {
+  // 标记 _isTaskRunning 为已使用（避免 lint 警告）
+  void _isTaskRunning;
+  
   const toast = useToast();
   const { registerTask } = useGlobalTask();
   
@@ -64,16 +73,21 @@ export default function PromptBar({
   const [files, setFiles] = useState<File[]>(initialFiles);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
   const [showAspectSelector, setShowAspectSelector] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isDragging, setIsDragging] = useState(false); // 新增：拖拽状态
-  const [imageCount, setImageCount] = useState<ImageCount>(1); // 新增：生成数量状态
-  const [showCountSelector, setShowCountSelector] = useState(false); // 新增：数量选择器显示状态
+  const [isDragging, setIsDragging] = useState(false); // 拖拽状态
+  const [imageCount, setImageCount] = useState<ImageCount>(1); // 生成数量状态
+  const [showCountSelector, setShowCountSelector] = useState(false); // 数量选择器显示状态
+  const [isSending, setIsSending] = useState(false); // 正在发送请求（用于按钮 loading 状态）
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const aspectSelectorRef = useRef<HTMLDivElement>(null);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
   const countSelectorRef = useRef<HTMLDivElement>(null);
   const countBtnRef = useRef<HTMLButtonElement>(null);
+  
+  // 防抖：记录上次提交时间
+  const lastSubmitTimeRef = useRef<number>(0);
+  // 标记是否正在发送请求（用于防止同一次点击的重复提交）
+  const isSubmittingRef = useRef<boolean>(false);
 
   // 当 initialPrompt 或 promptVersion 变化时更新 prompt
   // promptVersion 用于强制更新，即使 initialPrompt 值相同
@@ -85,115 +99,17 @@ export default function PromptBar({
     setFiles(initialFiles);
   }, [initialFiles]);
 
+  // 当 initialImageCount 或 promptVersion 变化时更新 imageCount
+  // promptVersion 用于强制更新，即使 initialImageCount 值相同
+  useEffect(() => {
+    setImageCount(initialImageCount);
+  }, [initialImageCount, promptVersion]);
+
   // 统一更新文件的辅助函数（同时更新内部状态和通知父组件）
   const updateFiles = (newFiles: File[]) => {
     setFiles(newFiles);
     onFilesChange?.(newFiles);
   };
-
-  // 监听外部触发生成
-  useEffect(() => {
-    if (triggerGenerate && (prompt.trim() || files.length > 0) && !isGenerating) {
-      const timer = setTimeout(() => {
-        const doSubmit = async () => {
-          if (isGenerating) return;
-          if (!prompt.trim() && files.length === 0) {
-            toast.warning('请输入提示词或上传参考图');
-            return;
-          }
-
-          // 保存当前输入值用于发送
-          const currentPrompt = prompt;
-          const currentFiles = [...files];
-          const currentImageCount = imageCount;
-          const currentAspectRatio = aspectRatio;
-
-          setIsGenerating(true);
-          onGenerateStart?.(currentPrompt, currentImageCount);
-
-          // 立即清空输入框，让用户可以编辑下一个任务
-          setPrompt('');
-          updateFiles([]);
-          if(textareaRef.current) textareaRef.current.style.height = '80px';
-
-          try {
-            const formData = new FormData();
-            formData.append('prompt', currentPrompt || ' ');
-            formData.append('aspectRatio', currentAspectRatio);
-            formData.append('imageSize', '2K');
-            formData.append('count', String(currentImageCount));
-            
-            currentFiles.forEach((file) => {
-              formData.append('images', file);
-            });
-
-            // 多图生成使用 SSE 流式接口
-            if (currentImageCount > 1 && (onSSEStart || onSSEImage || onSSEComplete)) {
-              await api.generateWithSSE(formData, {
-                onStart: (event) => {
-                  console.log('[PromptBar] SSE Start:', event);
-                  onSSEStart?.(event);
-                },
-                onImage: (event) => {
-                  console.log('[PromptBar] SSE Image:', event);
-                  onSSEImage?.(event);
-                },
-                onComplete: (event) => {
-                  console.log('[PromptBar] SSE Complete:', event);
-                  onSSEComplete?.(event);
-                  setIsGenerating(false);
-                },
-                onError: (error) => {
-                  console.error('[PromptBar] SSE Error:', error);
-                  const { message } = getErrorMessage(error.message || error);
-                  onError(message, currentPrompt, currentImageCount);
-                  setIsGenerating(false);
-                },
-              });
-              return;
-            }
-
-            // 单图或无 SSE 回调时，使用传统方式
-            const response = await api.generate(formData);
-
-            if (!response.ok) {
-              const errData = await response.json();
-              const { message: errorMsg } = getErrorMessage(errData, response.status);
-              throw new Error(errorMsg);
-            }
-
-            const data = await response.json();
-            
-            // 处理多图响应 (Requirements: 5.2)
-            if (currentImageCount > 1 && data.images && onGenerateMulti) {
-              onGenerateMulti(data as GenerateMultiResponse);
-              setIsGenerating(false);
-            } else if (data.image_url) {
-              // 单图响应格式 (向后兼容 - 同步模式)
-              onGenerate(data as GenerateResponse);
-              setIsGenerating(false);
-            } else if (data.task_id) {
-              // 异步模式：后端返回 task_id，前端需要轮询
-              registerTask(data.task_id, GenerationType.CREATE as GenerationTypeValue);
-              onTaskCreated?.(data.task_id);
-              // 异步模式下设置 isGenerating = false
-              // 让 Create 页面通过 isTaskRunning prop 来控制按钮状态
-              setIsGenerating(false);
-            } else {
-              throw new Error('后端未返回图片地址');
-            }
-          } catch (error) {
-            const { message } = getErrorMessage(error);
-            onError(message, currentPrompt, currentImageCount);
-            setIsGenerating(false);
-          }
-        };
-        doSubmit();
-        onTriggered?.();
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [triggerGenerate, prompt, files, isGenerating, aspectRatio, imageCount, onGenerate, onGenerateMulti, onGenerateStart, onError, onTriggered, toast, onSSEStart, onSSEImage, onSSEComplete, registerTask]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -256,9 +172,7 @@ export default function PromptBar({
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!isGenerating) {
-      setIsDragging(true);
-    }
+    setIsDragging(true);
   };
 
   // 处理拖拽离开
@@ -288,8 +202,6 @@ export default function PromptBar({
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
-
-    if (isGenerating) return;
 
     // 首先检查是否有文件
     const droppedFiles = Array.from(e.dataTransfer.files).filter(f => 
@@ -333,12 +245,29 @@ export default function PromptBar({
     }
   };
 
-  const handleSubmit = async () => {
-    if (isGenerating) return;
+  const handleSubmit = useCallback(async () => {
+    // 防抖：防止快速双击
+    const now = Date.now();
+    if (now - lastSubmitTimeRef.current < DEBOUNCE_INTERVAL) {
+      console.log('[PromptBar] Debounced - too fast');
+      return;
+    }
+    
+    // 防止重复提交（同一次点击）
+    if (isSubmittingRef.current) {
+      console.log('[PromptBar] Already submitting');
+      return;
+    }
+    
     if (!prompt.trim() && files.length === 0) {
       toast.warning('请输入提示词或上传参考图');
       return;
     }
+
+    // 记录提交时间并标记正在提交
+    lastSubmitTimeRef.current = now;
+    isSubmittingRef.current = true;
+    setIsSending(true); // 显示发送中状态
 
     // 保存当前输入值用于发送
     const currentPrompt = prompt;
@@ -346,13 +275,13 @@ export default function PromptBar({
     const currentImageCount = imageCount;
     const currentAspectRatio = aspectRatio;
 
-    setIsGenerating(true);
-    onGenerateStart?.(currentPrompt, currentImageCount);
-
     // 立即清空输入框，让用户可以编辑下一个任务
     setPrompt('');
     updateFiles([]);
     if(textareaRef.current) textareaRef.current.style.height = '80px';
+
+    // 通知父组件开始生成
+    onGenerateStart?.(currentPrompt, currentImageCount);
 
     try {
       const formData = new FormData();
@@ -367,6 +296,10 @@ export default function PromptBar({
 
       // 多图生成使用 SSE 流式接口
       if (currentImageCount > 1 && (onSSEStart || onSSEImage || onSSEComplete)) {
+        // SSE 模式：请求发送后立即重置状态，允许用户继续发送新请求
+        isSubmittingRef.current = false;
+        setIsSending(false);
+        
         await api.generateWithSSE(formData, {
           onStart: (event) => {
             console.log('[PromptBar] SSE Start:', event);
@@ -379,13 +312,11 @@ export default function PromptBar({
           onComplete: (event) => {
             console.log('[PromptBar] SSE Complete:', event);
             onSSEComplete?.(event);
-            setIsGenerating(false);
           },
           onError: (error) => {
             console.error('[PromptBar] SSE Error:', error);
             const { message } = getErrorMessage(error.message || error);
             onError(message, currentPrompt, currentImageCount);
-            setIsGenerating(false);
           },
         });
         return;
@@ -405,27 +336,49 @@ export default function PromptBar({
       // 处理多图响应 (Requirements: 5.2)
       if (currentImageCount > 1 && data.images && onGenerateMulti) {
         onGenerateMulti(data as GenerateMultiResponse);
-        setIsGenerating(false);
       } else if (data.image_url) {
         // 单图响应格式 (向后兼容 - 同步模式)
         onGenerate(data as GenerateResponse);
-        setIsGenerating(false);
       } else if (data.task_id) {
         // 异步模式：后端返回 task_id，前端需要轮询
         registerTask(data.task_id, GenerationType.CREATE as GenerationTypeValue);
         onTaskCreated?.(data.task_id);
-        // 异步模式下设置 isGenerating = false
-        // 让 Create 页面通过 isTaskRunning prop 来控制按钮状态
-        setIsGenerating(false);
       } else {
         throw new Error('后端未返回图片地址');
       }
     } catch (error) {
       const { message } = getErrorMessage(error);
       onError(message, currentPrompt, currentImageCount);
-      setIsGenerating(false);
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSending(false); // 重置发送状态
     }
-  };
+  }, [prompt, files, imageCount, aspectRatio, onGenerateStart, onSSEStart, onSSEImage, onSSEComplete, onGenerateMulti, onGenerate, onTaskCreated, onError, toast, registerTask]);
+
+  // 监听外部触发生成（用于"再次生成"功能）
+  useEffect(() => {
+    if (triggerGenerate && (prompt.trim() || files.length > 0)) {
+      // 防抖检查
+      const now = Date.now();
+      if (now - lastSubmitTimeRef.current < DEBOUNCE_INTERVAL) {
+        console.log('[PromptBar] External trigger debounced');
+        onTriggered?.();
+        return;
+      }
+      
+      if (isSubmittingRef.current) {
+        console.log('[PromptBar] External trigger blocked - already submitting');
+        onTriggered?.();
+        return;
+      }
+      
+      const timer = setTimeout(() => {
+        handleSubmit();
+        onTriggered?.();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [triggerGenerate, prompt, files, handleSubmit, onTriggered]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -506,7 +459,7 @@ export default function PromptBar({
                   setImageCount(count);
                   setShowCountSelector(false);
                 }}
-                disabled={isGenerating || isDisabled}
+                disabled={isDisabled}
               />
             </div>
           )}
@@ -547,10 +500,10 @@ export default function PromptBar({
 
           <button
             onClick={handleSubmit}
-            disabled={isGenerating || isTaskRunning || isDisabled || (!prompt.trim() && files.length === 0)}
+            disabled={isDisabled || isSending || (!prompt.trim() && files.length === 0)}
             className="btn-red w-12 h-12 rounded-xl flex items-center justify-center shadow-lg shadow-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95 shrink-0"
           >
-            {(isGenerating || isTaskRunning) ? (
+            {isSending ? (
               <Loader2 className="w-6 h-6 animate-spin" />
             ) : (
               <ArrowRight className="w-6 h-6" />

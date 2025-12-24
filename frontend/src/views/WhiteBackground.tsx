@@ -80,7 +80,7 @@ export default function WhiteBackground() {
   }, [handleError]);
 
   // Async generation hook - for new generations
-  const { isGenerating, startGeneration } = useAsyncGeneration({
+  const { isGenerating, startGeneration, pendingTasks } = useAsyncGeneration({
     onComplete: handleTaskComplete,
     onError: handleError,
   });
@@ -251,7 +251,7 @@ export default function WhiteBackground() {
             </div>
           </div>
 
-          {/* History section - 只有恢复的任务才显示在这里 */}
+          {/* History section */}
           <HistorySection
             title="白底图历史记录"
             history={history}
@@ -259,6 +259,7 @@ export default function WhiteBackground() {
             onImagePreview={setLightboxImage}
             emptyText="暂无白底图生成记录"
             processingTasks={processingTasks}
+            pendingTasks={pendingTasks}
           />
         </div>
       </div>

@@ -49,16 +49,35 @@ interface BatchResult {
 
 export default function Create() {
   const toast = useToast();
-  const { isTaskPolling, getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask } = useGlobalTask();
+  const { getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask } = useGlobalTask();
   const [history, setHistory] = useState<GenerationHistory[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null); // 当前异步任务 ID
+  
+  // 多任务占位卡片状态 - 支持同时显示多个正在生成的任务
+  interface PendingTask {
+    id: string;
+    prompt: string;
+    imageCount: number;
+    timestamp: number;
+    taskId?: string; // 关联的后端任务 ID（用于精确清除，非 SSE 模式）
+    batchId?: string; // 关联的批次 ID（用于精确清除，SSE 模式）
+  }
+  const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
+  
+  // 当前正在处理的 pendingTask ID 队列（用于关联 taskId，非 SSE 模式）
+  // 使用队列而不是单个值，以支持快速连续发送多个任务
+  const pendingTaskIdQueueRef = useRef<string[]>([]);
+  
+  // SSE 模式：等待 SSE start 事件的 pendingTask ID 队列
+  // 与非 SSE 模式分开，避免混淆
+  const pendingSSETaskIdQueueRef = useRef<string[]>([]);
   
   // PromptBar state lifting for repopulation
   const [selectedPrompt, setSelectedPrompt] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedImageCount, setSelectedImageCount] = useState<1 | 2 | 3 | 4>(1); // 选中的图片数量（用于重新生成）
   const [promptUpdateKey, setPromptUpdateKey] = useState(0); // 用于强制更新 PromptBar 的 key
   const [triggerGenerate, setTriggerGenerate] = useState(false);
   const [counterRefresh, setCounterRefresh] = useState(0);
@@ -188,6 +207,16 @@ export default function Create() {
   // Task recovery callbacks
   const handleTaskComplete = useCallback((task: GenerationTask) => {
     console.log('[Create] Task completed:', task.task_id);
+    // 清除对应的 pendingTask（通过 taskId 精确匹配）
+    setPendingTasks(prev => {
+      const idx = prev.findIndex(p => p.taskId === task.task_id);
+      if (idx !== -1) {
+        return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+      }
+      // 如果没找到匹配的 taskId，不清除任何 pendingTask
+      // 这种情况可能是刷新后恢复的任务，pendingTasks 已经是空的
+      return prev;
+    });
     // 清空当前会话的批次结果，避免与历史记录重复显示
     setBatchResults([]);
     // Reload history to show the completed task
@@ -199,6 +228,15 @@ export default function Create() {
 
   const handleTaskFailed = useCallback((task: GenerationTask) => {
     console.log('[Create] Task failed:', task.task_id, task.error_msg);
+    // 清除对应的 pendingTask（通过 taskId 精确匹配）
+    setPendingTasks(prev => {
+      const idx = prev.findIndex(p => p.taskId === task.task_id);
+      if (idx !== -1) {
+        return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+      }
+      // 如果没找到匹配的 taskId，不清除任何 pendingTask
+      return prev;
+    });
     const { message, isQuotaError } = getErrorMessage(task.error_msg);
     const taskImageCount = task.image_count || 1;
     
@@ -245,107 +283,102 @@ export default function Create() {
   // 计算任务运行状态（用于禁用重新生成按钮和发送按钮）
   const isTaskRunning = isGenerating || !!currentTaskId || processingTasks.length > 0 || !!streamingBatch;
 
-  // 处理重新生成时检查任务状态
+  // 处理重新生成（不再检查任务状态，允许并发生成）
   const handleRegenerateWithCheck = useCallback((callback: () => void) => {
-    if (isTaskRunning) {
-      toast.warning('请等待当前任务完成后再操作');
-      return;
-    }
+    // 直接执行回调，允许用户在生成过程中继续发送新任务
     callback();
-  }, [isTaskRunning, toast]);
+  }, []);
 
-  // 监听当前任务完成（通过 GlobalTaskContext 轮询）
+  // 监听所有 pendingTasks 中的任务完成（通过 GlobalTaskContext 轮询）
+  // 支持多任务并发：遍历所有有 taskId 的 pendingTask，检查它们的完成状态
   useEffect(() => {
-    if (!currentTaskId) {
-      console.log('[Create] No currentTaskId, skipping task monitoring');
+    // 获取所有有 taskId 的 pendingTasks
+    const tasksToMonitor = pendingTasks.filter(p => p.taskId);
+    
+    if (tasksToMonitor.length === 0) {
       return;
     }
     
-    console.log('[Create] Starting task monitoring for:', currentTaskId);
+    console.log('[Create] Monitoring tasks:', tasksToMonitor.map(t => t.taskId));
     
     const checkInterval = setInterval(() => {
-      const polling = isTaskPolling(currentTaskId);
-      const completedTask = getCompletedTask(currentTaskId);
-      const failedTask = getFailedTask(currentTaskId);
-      
-      console.log('[Create] Task check:', {
-        taskId: currentTaskId,
-        isPolling: polling,
-        hasCompleted: !!completedTask,
-        hasFailed: !!failedTask,
-      });
-      
-      // 优先检查是否有完成或失败的任务结果
-      if (completedTask) {
-        console.log('[Create] Task completed via GlobalTaskContext:', completedTask.task_id);
-        // 先清理任务，再更新状态
-        clearCompletedTask(currentTaskId);
-        setIsGenerating(false);
-        setGeneratingId(null);
-        setCurrentTaskId(null);
-        // 清空当前会话的批次结果，避免与历史记录重复显示
-        setBatchResults([]);
-        // 重新加载历史记录
-        loadHistory();
-        // 刷新计数器
-        setCounterRefresh(prev => prev + 1);
-        return;
-      }
-      
-      if (failedTask) {
-        console.log('[Create] Task failed via GlobalTaskContext:', failedTask.task_id);
-        // 先清理任务
-        clearFailedTask(currentTaskId);
-        setIsGenerating(false);
-        setGeneratingId(null);
-        setCurrentTaskId(null);
+      for (const pendingTask of tasksToMonitor) {
+        const taskId = pendingTask.taskId!;
+        const completedTask = getCompletedTask(taskId);
+        const failedTask = getFailedTask(taskId);
         
-        // 添加失败记录到列表，显示 ErrorCard
-        const { message, isQuotaError } = getErrorMessage(failedTask.error_msg);
-        const taskImageCount = failedTask.image_count || 1;
-        
-        if (taskImageCount > 1) {
-          const failedBatch: BatchResult = {
-            batchId: 'failed-task-' + failedTask.task_id,
-            images: Array.from({ length: taskImageCount }, (_, index) => ({
-              error: message,
-              isLoading: false,
-              index,
-            })),
-            prompt: failedTask.prompt || currentPrompt || '未知提示词',
-            timestamp: Date.now(),
-            imageCount: taskImageCount,
-          };
-          setBatchResults(prev => [...prev, failedBatch]);
-        } else {
-          const failedRecord: FailedGeneration = {
-            id: 'failed-task-' + failedTask.task_id,
-            prompt: failedTask.prompt || currentPrompt || '未知提示词',
-            errorMessage: message,
-            timestamp: Date.now(),
-          };
-          setFailedGenerations(prev => [...prev, failedRecord]);
+        if (completedTask) {
+          console.log('[Create] Task completed via GlobalTaskContext:', completedTask.task_id);
+          clearCompletedTask(taskId);
+          
+          // 清除对应的 pendingTask
+          setPendingTasks(prev => prev.filter(p => p.taskId !== taskId));
+          
+          // 如果这是当前任务，重置状态
+          if (currentTaskId === taskId) {
+            setIsGenerating(false);
+            setCurrentTaskId(null);
+          }
+          
+          // 清空当前会话的批次结果，避免与历史记录重复显示
+          setBatchResults([]);
+          // 重新加载历史记录
+          loadHistory();
+          // 刷新计数器
+          setCounterRefresh(prev => prev + 1);
         }
         
-        if (isQuotaError) {
-          setShowQuotaError(true);
+        if (failedTask) {
+          console.log('[Create] Task failed via GlobalTaskContext:', failedTask.task_id);
+          clearFailedTask(taskId);
+          
+          // 清除对应的 pendingTask
+          setPendingTasks(prev => prev.filter(p => p.taskId !== taskId));
+          
+          // 如果这是当前任务，重置状态
+          if (currentTaskId === taskId) {
+            setIsGenerating(false);
+            setCurrentTaskId(null);
+          }
+          
+          // 添加失败记录到列表，显示 ErrorCard
+          const { message, isQuotaError } = getErrorMessage(failedTask.error_msg);
+          const taskImageCount = failedTask.image_count || 1;
+          
+          if (taskImageCount > 1) {
+            const failedBatch: BatchResult = {
+              batchId: 'failed-task-' + failedTask.task_id,
+              images: Array.from({ length: taskImageCount }, (_, index) => ({
+                error: message,
+                isLoading: false,
+                index,
+              })),
+              prompt: failedTask.prompt || currentPrompt || '未知提示词',
+              timestamp: Date.now(),
+              imageCount: taskImageCount,
+            };
+            setBatchResults(prev => [...prev, failedBatch]);
+          } else {
+            const failedRecord: FailedGeneration = {
+              id: 'failed-task-' + failedTask.task_id,
+              prompt: failedTask.prompt || currentPrompt || '未知提示词',
+              errorMessage: message,
+              timestamp: Date.now(),
+            };
+            setFailedGenerations(prev => [...prev, failedRecord]);
+          }
+          
+          if (isQuotaError) {
+            setShowQuotaError(true);
+          }
         }
-        return;
-      }
-      
-      // 如果任务不在轮询中，也没有完成/失败结果，可能是未知状态
-      if (!polling) {
-        console.log('[Create] Task not polling and no result, waiting...', currentTaskId);
-        // 给一点时间让 GlobalTaskContext 处理完成
-        // 不立即重置，等待下一次检查
       }
     }, 500);
     
     return () => {
-      console.log('[Create] Stopping task monitoring for:', currentTaskId);
       clearInterval(checkInterval);
     };
-  }, [currentTaskId, isTaskPolling, getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask, loadHistory, currentPrompt]);
+  }, [pendingTasks, currentTaskId, getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask, loadHistory, currentPrompt]);
 
   useEffect(() => {
     loadHistory();
@@ -407,8 +440,19 @@ export default function Create() {
   // 处理单图生成完成 (向后兼容)
   // 注意：在 Mock 模式下，需要传入 response 来显示结果
   const handleGenerate = async (response: GenerateResponse) => {
+    // 清除对应的 pendingTask（从队列中取出第一个）
+    const pendingId = pendingTaskIdQueueRef.current.shift();
+    setPendingTasks(prev => {
+      if (pendingId) {
+        const idx = prev.findIndex(p => p.id === pendingId);
+        if (idx !== -1) {
+          return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+        }
+      }
+      // 如果没有 pendingId，不清除任何 pendingTask
+      return prev;
+    });
     setIsGenerating(false);
-    setGeneratingId(null);
     setCurrentTaskId(null); // 重置任务 ID
     
     // Mock 模式下，将单图结果也添加到 batchResults 中显示
@@ -441,8 +485,19 @@ export default function Create() {
 
   // 处理多图生成响应 (Requirements: 5.2)
   const handleGenerateMulti = async (response: GenerateMultiResponse) => {
+    // 清除对应的 pendingTask（从队列中取出第一个）
+    const pendingId = pendingTaskIdQueueRef.current.shift();
+    setPendingTasks(prev => {
+      if (pendingId) {
+        const idx = prev.findIndex(p => p.id === pendingId);
+        if (idx !== -1) {
+          return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+        }
+      }
+      // 如果没有 pendingId，不清除任何 pendingTask
+      return prev;
+    });
     setIsGenerating(false);
-    setGeneratingId(null);
     setCurrentTaskId(null); // 重置任务 ID
     
     // 将多图响应转换为 BatchResult
@@ -477,20 +532,63 @@ export default function Create() {
   };
 
   const handleGenerateStart = (prompt?: string, imageCount?: number) => {
+    // 创建新的待处理任务
+    // 使用时间戳 + 随机字符串确保唯一性
+    const newTaskId = 'pending-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    const newTask: PendingTask = {
+      id: newTaskId,
+      prompt: prompt || '正在思考...',
+      imageCount: imageCount || 1,
+      timestamp: Date.now(),
+    };
+    
+    setPendingTasks(prev => [...prev, newTask]);
+    
+    // 根据图片数量决定使用哪种关联方式
+    // SSE 模式（多图）：使用 SSE 队列，在 handleSSEStart 时通过 batch_id 关联
+    // 非 SSE 模式（单图）：使用普通队列，在响应时通过队列顺序关联
+    if (imageCount && imageCount > 1) {
+      // SSE 模式：将 pendingTask ID 加入 SSE 队列
+      pendingSSETaskIdQueueRef.current.push(newTaskId);
+    } else {
+      // 非 SSE 模式：将 pendingTask ID 加入普通队列
+      pendingTaskIdQueueRef.current.push(newTaskId);
+    }
+    
+    // 保持向后兼容
     setIsGenerating(true);
-    setGeneratingId('gen-' + Date.now());
     if (prompt) setCurrentPrompt(prompt);
     if (imageCount) setCurrentImageCount(imageCount);
     setTimeout(scrollToBottom, 100);
   };
 
   const handleGenerateError = (error: string, prompt?: string, imageCount?: number) => {
+    const count = imageCount || currentImageCount;
+    
+    // 根据图片数量决定从哪个队列中取出 pendingTask ID
+    // SSE 模式（多图）：从 SSE 队列取出
+    // 非 SSE 模式（单图）：从普通队列取出
+    let pendingId: string | undefined;
+    if (count > 1) {
+      pendingId = pendingSSETaskIdQueueRef.current.shift();
+    } else {
+      pendingId = pendingTaskIdQueueRef.current.shift();
+    }
+    
+    setPendingTasks(prev => {
+      if (pendingId) {
+        const idx = prev.findIndex(p => p.id === pendingId);
+        if (idx !== -1) {
+          return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+        }
+      }
+      // 如果没有 pendingId，不清除任何 pendingTask
+      return prev;
+    });
     setIsGenerating(false);
-    setGeneratingId(null);
     setCurrentTaskId(null); // 重置任务 ID
     
     const { message, isQuotaError } = getErrorMessage(error);
-    const count = imageCount || currentImageCount;
     
     // 多图生成失败时，创建一个全部失败的 BatchResult (Requirements: 5.3, 6.3)
     if (count > 1) {
@@ -559,10 +657,7 @@ export default function Create() {
 
   // 重新生成：使用历史记录的提示词和参考图
   const handleRegenerate = async (item: GenerationHistory) => {
-    if (isTaskRunning) {
-      toast.warning('请等待当前任务完成后再操作');
-      return;
-    }
+    // 不再检查任务状态，允许用户在生成过程中继续发送新任务
     try {
       // 解析参考图
       let refImageUrls: string[] = [];
@@ -584,10 +679,13 @@ export default function Create() {
         }
       }
 
-      // 设置提示词和参考图
+      // 设置提示词、参考图和图片数量
       setPromptUpdateKey(prev => prev + 1);
       setSelectedPrompt(item.prompt || '');
       setSelectedFiles(refFiles);
+      // 保留原来的图片数量（batch_total），如果没有则默认为 1
+      const imageCount = (item.batch_total || 1) as 1 | 2 | 3 | 4;
+      setSelectedImageCount(imageCount);
 
       // 等待状态更新后触发生成
       setTimeout(() => {
@@ -622,11 +720,14 @@ export default function Create() {
         }
       }
 
-      // 设置提示词和参考图（不触发生成）
+      // 设置提示词、参考图和图片数量（不触发生成）
       // 更新 key 强制 PromptBar 重新接收 initialPrompt
       setPromptUpdateKey(prev => prev + 1);
       setSelectedPrompt(item.prompt || '');
       setSelectedFiles(refFiles);
+      // 保留原来的图片数量
+      const imageCount = (item.batch_total || 1) as 1 | 2 | 3 | 4;
+      setSelectedImageCount(imageCount);
 
       // 滚动到底部，让用户看到输入框
       setTimeout(scrollToBottom, 100);
@@ -660,10 +761,7 @@ export default function Create() {
 
   // 重新生成批次（带参考图）：使用相同的提示词和参考图重新生成
   const handleRegenerateBatchWithRef = async (batch: BatchResult) => {
-    if (isTaskRunning) {
-      toast.warning('请等待当前任务完成后再操作');
-      return;
-    }
+    // 不再检查任务状态，允许用户在生成过程中继续发送新任务
     try {
       // 加载参考图为 File 对象
       const refFiles: File[] = [];
@@ -679,14 +777,16 @@ export default function Create() {
       setPromptUpdateKey(prev => prev + 1);
       setSelectedPrompt(batch.prompt);
       setSelectedFiles(refFiles);
-      setCurrentImageCount(batch.imageCount);
+      const imageCount = (batch.imageCount || 1) as 1 | 2 | 3 | 4;
+      setSelectedImageCount(imageCount);
       setTimeout(() => setTriggerGenerate(true), 200);
     } catch (error) {
       console.error('加载参考图失败:', error);
       // 即使参考图加载失败，也继续生成
       setPromptUpdateKey(prev => prev + 1);
       setSelectedPrompt(batch.prompt);
-      setCurrentImageCount(batch.imageCount);
+      const imageCount = (batch.imageCount || 1) as 1 | 2 | 3 | 4;
+      setSelectedImageCount(imageCount);
       setTimeout(() => setTriggerGenerate(true), 200);
     }
   };
@@ -708,12 +808,16 @@ export default function Create() {
       setPromptUpdateKey(prev => prev + 1);
       setSelectedPrompt(batch.prompt);
       setSelectedFiles(refFiles);
+      const imageCount = (batch.imageCount || 1) as 1 | 2 | 3 | 4;
+      setSelectedImageCount(imageCount);
       setTimeout(scrollToBottom, 100);
       toast.success(refFiles.length > 0 ? '已填充提示词和参考图，可编辑后发送' : '已填充提示词，可编辑后发送');
     } catch (error) {
       console.error('加载参考图失败:', error);
       setPromptUpdateKey(prev => prev + 1);
       setSelectedPrompt(batch.prompt);
+      const imageCount = (batch.imageCount || 1) as 1 | 2 | 3 | 4;
+      setSelectedImageCount(imageCount);
       setTimeout(scrollToBottom, 100);
       toast.success('已填充提示词，可编辑后发送');
     }
@@ -787,7 +891,9 @@ export default function Create() {
 
   // SSE 流式生成事件处理
   const handleSSEStart = useCallback((event: SSEStartEvent) => {
-    console.log('[Create] SSE Start:', event);
+    // 从 SSE 队列中取出第一个 pendingTask ID，并关联 batch_id
+    const pendingId = pendingSSETaskIdQueueRef.current.shift();
+    
     // 创建流式批次，初始化所有图片为 loading 状态
     const newBatch: BatchResult = {
       batchId: event.batch_id,
@@ -800,6 +906,17 @@ export default function Create() {
       imageCount: event.count,
       refImages: event.ref_images || [], // 保存参考图
     };
+    
+    // 同时更新 pendingTasks 和 streamingBatch
+    // 使用函数式更新确保状态一致性
+    if (pendingId) {
+      setPendingTasks(prev => prev.map(p => 
+        p.id === pendingId 
+          ? { ...p, batchId: event.batch_id }
+          : p
+      ));
+    }
+    
     setStreamingBatch(newBatch);
     setTimeout(scrollToBottom, 100);
   }, []);
@@ -824,8 +941,9 @@ export default function Create() {
 
   const handleSSEComplete = useCallback(async (event: SSECompleteEvent) => {
     console.log('[Create] SSE Complete:', event);
+    // 使用 batch_id 精确清除对应的 pendingTask（而不是队列）
+    setPendingTasks(prev => prev.filter(p => p.batchId !== event.batch_id));
     setIsGenerating(false);
-    setGeneratingId(null);
     
     // 将流式批次移动到完成的批次列表
     if (streamingBatch) {
@@ -861,7 +979,7 @@ export default function Create() {
   // 将历史记录按 batch_id 分组
   // 返回一个数组，每个元素是一个"显示项"，可能是单图或多图批次
   interface HistoryDisplayItem {
-    type: 'single' | 'batch' | 'failed' | 'session-batch';
+    type: 'single' | 'batch' | 'failed' | 'session-batch' | 'pending' | 'recovering' | 'streaming';
     item?: GenerationHistory;  // 单图时使用
     batchId?: string;          // 批次时使用
     items?: GenerationHistory[]; // 批次时使用
@@ -870,8 +988,12 @@ export default function Create() {
     refImages?: string | string[];  // 参考图（字符串或数组）
     // 失败记录专用
     failedRecord?: FailedGeneration;
-    // 当前会话批次专用
+    // 当前会话批次专用（也用于 streaming 类型）
     sessionBatch?: BatchResult;
+    // 正在处理的任务专用
+    pendingTask?: PendingTask;
+    // 恢复的任务专用
+    recoveringTask?: GenerationTask;
   }
   
   const groupedHistory = React.useMemo((): HistoryDisplayItem[] => {
@@ -959,6 +1081,54 @@ export default function Create() {
       });
     }
     
+    // 收集 processingTasks 的 task_id，用于去重
+    const processingTaskIds = new Set(processingTasks.map(t => t.task_id));
+    
+    // 添加恢复的处理中任务（刷新后恢复的）
+    for (const task of processingTasks) {
+      result.push({
+        type: 'recovering',
+        prompt: task.prompt || '正在思考...',
+        timestamp: new Date(task.created_at).getTime(),
+        recoveringTask: task,
+      });
+    }
+    
+    // 添加当前会话的待处理任务
+    // 修复：不再根据 streamingBatch 是否存在来决定是否显示 pendingTasks
+    // 而是根据每个 pendingTask 是否已经有对应的 batchId（SSE 模式）来决定
+    // 如果 pendingTask 有 batchId 且等于 streamingBatch.batchId，说明它已经在 streamingBatch 中显示了，跳过
+    for (const task of pendingTasks) {
+      // 如果这个 pendingTask 已经有 taskId，且该 taskId 在 processingTasks 中，则跳过
+      if (task.taskId && processingTaskIds.has(task.taskId)) {
+        continue;
+      }
+      // 如果这个 pendingTask 已经有 batchId，且该 batchId 等于当前 streamingBatch 的 batchId，则跳过
+      // 因为它已经在 streamingBatch 中显示了
+      if (task.batchId && streamingBatch && task.batchId === streamingBatch.batchId) {
+        continue;
+      }
+      result.push({
+        type: 'pending',
+        prompt: task.prompt,
+        timestamp: task.timestamp,
+        pendingTask: task,
+      });
+    }
+    
+    // 添加当前正在流式生成的批次（SSE 模式）
+    // 将 streamingBatch 加入到排序列表中，而不是单独渲染在最后
+    if (streamingBatch) {
+      result.push({
+        type: 'streaming',
+        batchId: streamingBatch.batchId,
+        prompt: streamingBatch.prompt,
+        timestamp: streamingBatch.timestamp,
+        refImages: streamingBatch.refImages,
+        sessionBatch: streamingBatch, // 复用 sessionBatch 字段存储 streamingBatch
+      });
+    }
+    
     // 按时间戳排序（统一转换为数字比较）
     result.sort((a, b) => {
       const timeA = typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp;
@@ -967,7 +1137,7 @@ export default function Create() {
     });
     
     return result;
-  }, [history, failedGenerations, batchResults]);
+  }, [history, failedGenerations, batchResults, processingTasks, pendingTasks, streamingBatch]);
   
   // 使用分组后的历史记录
   const chatHistory = groupedHistory;
@@ -988,7 +1158,7 @@ export default function Create() {
         <div className="max-w-3xl mx-auto px-4 py-8 pb-32 min-h-full flex flex-col justify-end">
           
           {/* 空状态提示 - 考虑恢复中状态、处理中任务、批次结果和失败记录 */}
-          {history.length === 0 && batchResults.length === 0 && failedGenerations.length === 0 && !isGenerating && !isRecovering && processingTasks.length === 0 && (
+          {history.length === 0 && batchResults.length === 0 && failedGenerations.length === 0 && pendingTasks.length === 0 && !isRecovering && processingTasks.length === 0 && (
             <div className="flex flex-col items-center justify-center text-gray-400 py-20 fade-in-up">
               <div className="w-20 h-20 bg-gradient-to-br from-red-50 to-orange-50 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
                 <div className="w-8 h-8 bg-red-400/20 rounded-full blur-xl absolute"></div>
@@ -1080,7 +1250,6 @@ export default function Create() {
                               setSelectedPrompt(item.prompt);
                               setTimeout(() => setTriggerGenerate(true), 100);
                             })}
-                            disabled={isTaskRunning}
                           />
                         ) : (
                           <ImageCard
@@ -1090,7 +1259,6 @@ export default function Create() {
                             onRegenerate={handleRegenerate}
                             onEditPrompt={handleEditPrompt}
                             onUseAsReference={handleUseAsReference}
-                            disabled={isTaskRunning}
                           />
                         )}
                       </div>
@@ -1159,10 +1327,7 @@ export default function Create() {
                           </button>
                           <button
                             onClick={async () => {
-                              if (isTaskRunning) {
-                                toast.warning('请等待当前任务完成后再操作');
-                                return;
-                              }
+                              // 不再检查任务状态，允许用户在生成过程中继续发送新任务
                               // 多图批次重新生成：加载提示词和参考图
                               try {
                                 let refImageUrls: string[] = [];
@@ -1191,19 +1356,22 @@ export default function Create() {
                                 setPromptUpdateKey(prev => prev + 1);
                                 setSelectedPrompt(displayItem.prompt);
                                 setSelectedFiles(refFiles);
-                                setCurrentImageCount(batchTotal);
+                                // 使用 selectedImageCount 而不是 currentImageCount，确保 PromptBar 接收到正确的图片数量
+                                const imageCount = (batchTotal || 1) as 1 | 2 | 3 | 4;
+                                setSelectedImageCount(imageCount);
                                 setTimeout(() => setTriggerGenerate(true), 200);
                               } catch (error) {
                                 console.error('加载参考图失败:', error);
                                 setPromptUpdateKey(prev => prev + 1);
                                 setSelectedPrompt(displayItem.prompt);
-                                setCurrentImageCount(batchTotal);
+                                // 使用 selectedImageCount 而不是 currentImageCount
+                                const imageCount = (batchTotal || 1) as 1 | 2 | 3 | 4;
+                                setSelectedImageCount(imageCount);
                                 setTimeout(() => setTriggerGenerate(true), 200);
                               }
                             }}
-                            disabled={isTaskRunning}
-                            className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
-                            title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
+                            className="p-1.5 rounded-lg transition-colors text-gray-400 hover:text-red-500 hover:bg-red-50"
+                            title="重新生成"
                           >
                             <span className="text-xs">重新生成</span>
                           </button>
@@ -1287,9 +1455,8 @@ export default function Create() {
                           setSelectedPrompt(failed.prompt);
                           setTimeout(() => setTriggerGenerate(true), 100);
                         })}
-                        disabled={isTaskRunning}
-                        className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
-                        title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
+                        className="p-1.5 rounded-lg transition-colors text-gray-400 hover:text-red-500 hover:bg-red-50"
+                        title="重新生成"
                       >
                         <span className="text-xs">重新生成</span>
                       </button>
@@ -1322,7 +1489,6 @@ export default function Create() {
                           setSelectedPrompt(failed.prompt);
                           setTimeout(() => setTriggerGenerate(true), 100);
                         })}
-                        disabled={isTaskRunning}
                       />
                     </div>
                   </div>
@@ -1347,9 +1513,8 @@ export default function Create() {
                       </button>
                       <button
                         onClick={() => handleRegenerateBatchWithRef(batch)}
-                        disabled={isTaskRunning}
-                        className={`p-1.5 rounded-lg transition-colors ${isTaskRunning ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
-                        title={isTaskRunning ? '请等待当前任务完成' : '重新生成'}
+                        className="p-1.5 rounded-lg transition-colors text-gray-400 hover:text-red-500 hover:bg-red-50"
+                        title="重新生成"
                       >
                         <span className="text-xs">重新生成</span>
                       </button>
@@ -1396,14 +1561,12 @@ export default function Create() {
               );
             }
             
-            return null;
-          })}
-
-            {/* 恢复的处理中任务 - Requirements: 1.4, 2.1 */}
-            {processingTasks.map((task) => {
+            // 恢复的处理中任务（刷新后恢复的）
+            if (displayItem.type === 'recovering' && displayItem.recoveringTask) {
+              const task = displayItem.recoveringTask;
               const taskImageCount = task.image_count || 1;
               return (
-                <div key={task.task_id} className="flex flex-col w-full fade-in-up mt-8">
+                <div key={`recovering-${task.task_id}`} className="flex flex-col w-full fade-in-up mt-8">
                   <div className="flex justify-end mb-3 px-2">
                     <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm opacity-50">
                       {task.prompt || '正在思考...'}
@@ -1420,7 +1583,6 @@ export default function Create() {
                       </span>
                     </div>
                     <div className="w-full max-w-xl">
-                      {/* 使用 ImageGrid 显示占位，保持一致的样式 */}
                       <ImageGrid
                         images={Array.from({ length: taskImageCount }, (_, index) => ({
                           isLoading: true,
@@ -1433,72 +1595,80 @@ export default function Create() {
                   </div>
                 </div>
               );
-            })}
-
-            {/* SSE 流式生成中 - 实时显示每张图片 */}
-            {streamingBatch && (
-              <div className="flex flex-col w-full fade-in-up mt-8">
-                <div className="flex justify-end mb-3 px-2">
-                  <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm opacity-50">
-                    {streamingBatch.prompt} ({streamingBatch.imageCount}张)
-                  </div>
-                </div>
-                <div className="flex flex-col items-start w-full pl-2">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-white text-xs font-bold animate-pulse">
-                      AI
-                    </div>
-                    <span className="text-xs text-red-500 font-medium">
-                      正在生成 {streamingBatch.images.filter(img => !img.isLoading).length}/{streamingBatch.imageCount} 张图片...
-                    </span>
-                  </div>
-                  <div className="w-full max-w-xl">
-                    <ImageGrid
-                      images={streamingBatch.images}
-                      onImageClick={setLightboxImage}
-                      onUseAsReference={handleUseAsReference}
-                      prompt={streamingBatch.prompt}
-                      showFooter={true}
-                      refImages={streamingBatch.refImages}
-                      onRefImageClick={setLightboxImage}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 生成中状态 - 支持多图占位 (Requirements: 5.1) - 仅在非 SSE 模式下显示 */}
-            {isGenerating && generatingId && !streamingBatch && (
-              <div className="flex flex-col w-full fade-in-up mt-8">
-                 <div className="flex justify-end mb-3 px-2">
+            }
+            
+            // 当前会话的待处理任务
+            if (displayItem.type === 'pending' && displayItem.pendingTask) {
+              const task = displayItem.pendingTask;
+              return (
+                <div key={task.id} className="flex flex-col w-full fade-in-up mt-8">
+                  <div className="flex justify-end mb-3 px-2">
                     <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm opacity-50">
-                        {currentPrompt || '正在思考...'}
-                        {currentImageCount > 1 && ` (${currentImageCount}张)`}
+                      {task.prompt || '正在思考...'}
+                      {task.imageCount > 1 && ` (${task.imageCount}张)`}
                     </div>
-                </div>
-                <div className="flex flex-col items-start w-full pl-2">
-                   <div className="flex items-center gap-3 mb-2">
+                  </div>
+                  <div className="flex flex-col items-start w-full pl-2">
+                    <div className="flex items-center gap-3 mb-2">
                       <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-white text-xs font-bold animate-pulse">
-                          AI
+                        AI
                       </div>
                       <span className="text-xs text-red-500 font-medium">
-                        正在生成{currentImageCount > 1 ? ` ${currentImageCount} 张图片` : ''}...
+                        正在生成{task.imageCount > 1 ? ` ${task.imageCount} 张图片` : ''}...
                       </span>
-                  </div>
-                  <div className="w-full max-w-xl">
-                    {/* 多图生成时显示 ImageGrid 占位，单图也使用 ImageGrid 保持一致的样式 */}
-                    <ImageGrid
-                      images={Array.from({ length: currentImageCount }, (_, index) => ({
-                        isLoading: true,
-                        index,
-                      }))}
-                      onImageClick={() => {}}
-                      showFooter={true}
-                    />
+                    </div>
+                    <div className="w-full max-w-xl">
+                      <ImageGrid
+                        images={Array.from({ length: task.imageCount }, (_, index) => ({
+                          isLoading: true,
+                          index,
+                        }))}
+                        onImageClick={() => {}}
+                        showFooter={true}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            }
+            
+            // SSE 流式生成中 - 实时显示每张图片（现在按时间戳排序显示）
+            if (displayItem.type === 'streaming' && displayItem.sessionBatch) {
+              const batch = displayItem.sessionBatch;
+              return (
+                <div key={`streaming-${batch.batchId}`} className="flex flex-col w-full fade-in-up mt-8">
+                  <div className="flex justify-end mb-3 px-2">
+                    <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm opacity-50">
+                      {batch.prompt} ({batch.imageCount}张)
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-start w-full pl-2">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-white text-xs font-bold animate-pulse">
+                        AI
+                      </div>
+                      <span className="text-xs text-red-500 font-medium">
+                        正在生成 {batch.images.filter(img => !img.isLoading).length}/{batch.imageCount} 张图片...
+                      </span>
+                    </div>
+                    <div className="w-full max-w-xl">
+                      <ImageGrid
+                        images={batch.images}
+                        onImageClick={setLightboxImage}
+                        onUseAsReference={handleUseAsReference}
+                        prompt={batch.prompt}
+                        showFooter={true}
+                        refImages={batch.refImages}
+                        onRefImageClick={setLightboxImage}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            
+            return null;
+          })}
             
             {/* 滚动锚点 */}
             <div ref={bottomRef} className="h-4" />
@@ -1513,6 +1683,7 @@ export default function Create() {
         onError={handleGenerateError}
         initialPrompt={selectedPrompt}
         initialFiles={selectedFiles}
+        initialImageCount={selectedImageCount}
         onFilesChange={setSelectedFiles} 
         onPreviewImage={setLightboxImage}
         triggerGenerate={triggerGenerate}
@@ -1520,6 +1691,7 @@ export default function Create() {
           setTriggerGenerate(false);
           setSelectedPrompt('');
           setSelectedFiles([]);
+          setSelectedImageCount(1); // 重置图片数量
         }}
         // SSE 流式回调
         onSSEStart={handleSSEStart}
@@ -1531,6 +1703,15 @@ export default function Create() {
         onTaskCreated={(taskId) => {
           console.log('[Create] Task created:', taskId);
           setCurrentTaskId(taskId);
+          // 从队列中取出第一个 pendingTask ID，关联 taskId
+          const pendingId = pendingTaskIdQueueRef.current.shift();
+          if (pendingId) {
+            setPendingTasks(prev => prev.map(p => 
+              p.id === pendingId 
+                ? { ...p, taskId } 
+                : p
+            ));
+          }
         }}
         // 提示词更新版本号，用于强制更新
         promptVersion={promptUpdateKey}
