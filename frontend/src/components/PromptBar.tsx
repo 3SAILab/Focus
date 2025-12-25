@@ -15,10 +15,10 @@ import { getErrorMessage } from '../utils/errorHandler';
 const DEBOUNCE_INTERVAL = 500;
 
 interface PromptBarProps {
-  onGenerate: (response: GenerateResponse) => void;
-  onGenerateMulti?: (response: GenerateMultiResponse) => void; // 新增：多图生成回调
-  onGenerateStart?: (prompt?: string, imageCount?: number) => void; // 更新：传递图片数量
-  onError: (error: string, prompt?: string, imageCount?: number) => void; // 更新：传递图片数量
+  onGenerate: (response: GenerateResponse, tempId?: string) => void;
+  onGenerateMulti?: (response: GenerateMultiResponse, tempId?: string) => void; // 修复：传递 tempId
+  onGenerateStart?: (prompt?: string, imageCount?: number) => string; // 修复：返回 tempId
+  onError: (error: string, prompt?: string, imageCount?: number, tempId?: string) => void; // 修复：传递 tempId
   onPreviewImage?: (url: string) => void;
   initialPrompt?: string;
   initialFiles?: File[];
@@ -26,16 +26,16 @@ interface PromptBarProps {
   onFilesChange?: (files: File[]) => void; // 新增：用于父子组件文件状态同步
   triggerGenerate?: boolean;
   onTriggered?: () => void;
-  // SSE 流式回调
-  onSSEStart?: (event: SSEStartEvent) => void;
+  // SSE 流式回调 - 修复：传递 tempId
+  onSSEStart?: (event: SSEStartEvent, tempId?: string) => void;
   onSSEImage?: (event: SSEImageEvent) => void;
-  onSSEComplete?: (event: SSECompleteEvent) => void;
+  onSSEComplete?: (event: SSECompleteEvent, tempId?: string) => void;
   // 禁用状态（外部控制，用于创作工坊生成时禁用输入）
   disabled?: boolean;
   // 异步任务运行状态（外部控制，仅用于显示 loading 图标，不禁用发送）
   isTaskRunning?: boolean;
-  // 异步任务创建回调（用于通知父组件任务 ID）
-  onTaskCreated?: (taskId: string) => void;
+  // 修复：异步任务创建回调，传递 tempId 用于精确关联
+  onTaskCreated?: (taskId: string, tempId?: string) => void;
   // 提示词更新版本号（用于强制更新 initialPrompt）
   promptVersion?: number;
 }
@@ -280,8 +280,9 @@ export default function PromptBar({
     updateFiles([]);
     if(textareaRef.current) textareaRef.current.style.height = '80px';
 
-    // 通知父组件开始生成
-    onGenerateStart?.(currentPrompt, currentImageCount);
+    // 修复：通知父组件开始生成，并获取 tempId
+    // tempId 用于在整个异步生命周期中精确关联请求和响应
+    const tempId = onGenerateStart?.(currentPrompt, currentImageCount);
 
     try {
       const formData = new FormData();
@@ -303,7 +304,8 @@ export default function PromptBar({
         await api.generateWithSSE(formData, {
           onStart: (event) => {
             console.log('[PromptBar] SSE Start:', event);
-            onSSEStart?.(event);
+            // 修复：传递 tempId 给父组件，用于精确关联
+            onSSEStart?.(event, tempId);
           },
           onImage: (event) => {
             console.log('[PromptBar] SSE Image:', event);
@@ -311,12 +313,14 @@ export default function PromptBar({
           },
           onComplete: (event) => {
             console.log('[PromptBar] SSE Complete:', event);
-            onSSEComplete?.(event);
+            // 修复：传递 tempId 给父组件，用于精确清除
+            onSSEComplete?.(event, tempId);
           },
           onError: (error) => {
             console.error('[PromptBar] SSE Error:', error);
             const { message } = getErrorMessage(error.message || error);
-            onError(message, currentPrompt, currentImageCount);
+            // 修复：传递 tempId 给父组件，用于精确清除
+            onError(message, currentPrompt, currentImageCount, tempId);
           },
         });
         return;
@@ -335,20 +339,24 @@ export default function PromptBar({
       
       // 处理多图响应 (Requirements: 5.2)
       if (currentImageCount > 1 && data.images && onGenerateMulti) {
-        onGenerateMulti(data as GenerateMultiResponse);
+        // 修复：传递 tempId 给父组件
+        onGenerateMulti(data as GenerateMultiResponse, tempId);
       } else if (data.image_url) {
         // 单图响应格式 (向后兼容 - 同步模式)
-        onGenerate(data as GenerateResponse);
+        // 修复：传递 tempId 给父组件
+        onGenerate(data as GenerateResponse, tempId);
       } else if (data.task_id) {
         // 异步模式：后端返回 task_id，前端需要轮询
         registerTask(data.task_id, GenerationType.CREATE as GenerationTypeValue);
-        onTaskCreated?.(data.task_id);
+        // 修复：传递 tempId 给父组件，用于精确关联
+        onTaskCreated?.(data.task_id, tempId);
       } else {
         throw new Error('后端未返回图片地址');
       }
     } catch (error) {
       const { message } = getErrorMessage(error);
-      onError(message, currentPrompt, currentImageCount);
+      // 修复：传递 tempId 给父组件，用于精确清除
+      onError(message, currentPrompt, currentImageCount, tempId);
     } finally {
       isSubmittingRef.current = false;
       setIsSending(false); // 重置发送状态

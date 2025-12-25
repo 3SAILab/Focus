@@ -56,23 +56,21 @@ export default function Create() {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null); // 当前异步任务 ID
   
   // 多任务占位卡片状态 - 支持同时显示多个正在生成的任务
+  // 修复：废弃队列机制，改用 Map 进行显式 ID 关联
   interface PendingTask {
-    id: string;
+    id: string;           // 本地唯一 ID（tempId），在请求发起时生成
     prompt: string;
     imageCount: number;
-    timestamp: number;
-    taskId?: string; // 关联的后端任务 ID（用于精确清除，非 SSE 模式）
-    batchId?: string; // 关联的批次 ID（用于精确清除，SSE 模式）
+    timestamp: number;    // 创建时间戳（固定，不会因重渲染改变）
+    taskId?: string;      // 关联的后端任务 ID（用于精确清除，非 SSE 模式）
+    batchId?: string;     // 关联的批次 ID（用于精确清除，SSE 模式）
   }
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   
-  // 当前正在处理的 pendingTask ID 队列（用于关联 taskId，非 SSE 模式）
-  // 使用队列而不是单个值，以支持快速连续发送多个任务
-  const pendingTaskIdQueueRef = useRef<string[]>([]);
-  
-  // SSE 模式：等待 SSE start 事件的 pendingTask ID 队列
-  // 与非 SSE 模式分开，避免混淆
-  const pendingSSETaskIdQueueRef = useRef<string[]>([]);
+  // 修复：使用 Map 存储 tempId -> pendingTask 的映射关系
+  // 这样可以在响应返回时通过 tempId 精确找到对应的 pendingTask
+  // 而不是依赖队列顺序（队列顺序在并发请求时会出错）
+  const pendingTaskMapRef = useRef<Map<string, string>>(new Map()); // tempId -> pendingTask.id
   
   // PromptBar state lifting for repopulation
   const [selectedPrompt, setSelectedPrompt] = useState('');
@@ -438,20 +436,14 @@ export default function Create() {
   }, [isGenerating]);
 
   // 处理单图生成完成 (向后兼容)
-  // 注意：在 Mock 模式下，需要传入 response 来显示结果
-  const handleGenerate = async (response: GenerateResponse) => {
-    // 清除对应的 pendingTask（从队列中取出第一个）
-    const pendingId = pendingTaskIdQueueRef.current.shift();
-    setPendingTasks(prev => {
-      if (pendingId) {
-        const idx = prev.findIndex(p => p.id === pendingId);
-        if (idx !== -1) {
-          return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
-        }
-      }
-      // 如果没有 pendingId，不清除任何 pendingTask
-      return prev;
-    });
+  // 修复：接收 tempId 参数，用于精确清除对应的 pendingTask
+  const handleGenerate = async (response: GenerateResponse, tempId?: string) => {
+    // 修复：使用 tempId 精确清除对应的 pendingTask
+    if (tempId) {
+      setPendingTasks(prev => prev.filter(p => p.id !== tempId));
+      pendingTaskMapRef.current.delete(tempId);
+    }
+    
     setIsGenerating(false);
     setCurrentTaskId(null); // 重置任务 ID
     
@@ -484,19 +476,14 @@ export default function Create() {
   };
 
   // 处理多图生成响应 (Requirements: 5.2)
-  const handleGenerateMulti = async (response: GenerateMultiResponse) => {
-    // 清除对应的 pendingTask（从队列中取出第一个）
-    const pendingId = pendingTaskIdQueueRef.current.shift();
-    setPendingTasks(prev => {
-      if (pendingId) {
-        const idx = prev.findIndex(p => p.id === pendingId);
-        if (idx !== -1) {
-          return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
-        }
-      }
-      // 如果没有 pendingId，不清除任何 pendingTask
-      return prev;
-    });
+  // 修复：接收 tempId 参数，用于精确清除对应的 pendingTask
+  const handleGenerateMulti = async (response: GenerateMultiResponse, tempId?: string) => {
+    // 修复：使用 tempId 精确清除对应的 pendingTask
+    if (tempId) {
+      setPendingTasks(prev => prev.filter(p => p.id !== tempId));
+      pendingTaskMapRef.current.delete(tempId);
+    }
+    
     setIsGenerating(false);
     setCurrentTaskId(null); // 重置任务 ID
     
@@ -531,60 +518,47 @@ export default function Create() {
     setTimeout(scrollToBottom, 100);
   };
 
-  const handleGenerateStart = (prompt?: string, imageCount?: number) => {
+  // 修复：handleGenerateStart 返回 tempId，用于后续关联
+  // 这样 PromptBar 可以在发送请求时携带 tempId，响应时通过 tempId 精确关联
+  const handleGenerateStart = (prompt?: string, imageCount?: number): string => {
     // 创建新的待处理任务
     // 使用时间戳 + 随机字符串确保唯一性
-    const newTaskId = 'pending-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    const timestamp = Date.now();
+    const tempId = 'pending-' + timestamp + '-' + Math.random().toString(36).substring(2, 9);
     const newTask: PendingTask = {
-      id: newTaskId,
+      id: tempId,
       prompt: prompt || '正在思考...',
       imageCount: imageCount || 1,
-      timestamp: Date.now(),
+      timestamp: timestamp, // 固定时间戳，不会因重渲染改变
     };
     
     setPendingTasks(prev => [...prev, newTask]);
     
-    // 根据图片数量决定使用哪种关联方式
-    // SSE 模式（多图）：使用 SSE 队列，在 handleSSEStart 时通过 batch_id 关联
-    // 非 SSE 模式（单图）：使用普通队列，在响应时通过队列顺序关联
-    if (imageCount && imageCount > 1) {
-      // SSE 模式：将 pendingTask ID 加入 SSE 队列
-      pendingSSETaskIdQueueRef.current.push(newTaskId);
-    } else {
-      // 非 SSE 模式：将 pendingTask ID 加入普通队列
-      pendingTaskIdQueueRef.current.push(newTaskId);
-    }
+    // 修复：不再使用队列，而是将 tempId 存入 Map
+    // 后续通过 tempId 精确关联 taskId 或 batchId
+    pendingTaskMapRef.current.set(tempId, tempId);
     
     // 保持向后兼容
     setIsGenerating(true);
     if (prompt) setCurrentPrompt(prompt);
     if (imageCount) setCurrentImageCount(imageCount);
     setTimeout(scrollToBottom, 100);
+    
+    // 返回 tempId，供 PromptBar 使用
+    return tempId;
   };
 
-  const handleGenerateError = (error: string, prompt?: string, imageCount?: number) => {
+  // 修复：handleGenerateError 接收 tempId 参数，用于精确清除对应的 pendingTask
+  const handleGenerateError = (error: string, prompt?: string, imageCount?: number, tempId?: string) => {
     const count = imageCount || currentImageCount;
     
-    // 根据图片数量决定从哪个队列中取出 pendingTask ID
-    // SSE 模式（多图）：从 SSE 队列取出
-    // 非 SSE 模式（单图）：从普通队列取出
-    let pendingId: string | undefined;
-    if (count > 1) {
-      pendingId = pendingSSETaskIdQueueRef.current.shift();
-    } else {
-      pendingId = pendingTaskIdQueueRef.current.shift();
+    // 修复：使用 tempId 精确清除对应的 pendingTask
+    // 如果没有 tempId，则不清除任何 pendingTask（避免误删）
+    if (tempId) {
+      setPendingTasks(prev => prev.filter(p => p.id !== tempId));
+      pendingTaskMapRef.current.delete(tempId);
     }
     
-    setPendingTasks(prev => {
-      if (pendingId) {
-        const idx = prev.findIndex(p => p.id === pendingId);
-        if (idx !== -1) {
-          return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
-        }
-      }
-      // 如果没有 pendingId，不清除任何 pendingTask
-      return prev;
-    });
     setIsGenerating(false);
     setCurrentTaskId(null); // 重置任务 ID
     
@@ -890,9 +864,10 @@ export default function Create() {
   };
 
   // SSE 流式生成事件处理
-  const handleSSEStart = useCallback((event: SSEStartEvent) => {
-    // 从 SSE 队列中取出第一个 pendingTask ID，并关联 batch_id
-    const pendingId = pendingSSETaskIdQueueRef.current.shift();
+  // 修复：接收 tempId 参数，用于精确关联 pendingTask
+  const handleSSEStart = useCallback((event: SSEStartEvent, tempId?: string) => {
+    // 修复：使用 tempId 精确关联 pendingTask 的 batchId
+    // 而不是从队列中取出（队列顺序在并发请求时会出错）
     
     // 创建流式批次，初始化所有图片为 loading 状态
     const newBatch: BatchResult = {
@@ -907,11 +882,10 @@ export default function Create() {
       refImages: event.ref_images || [], // 保存参考图
     };
     
-    // 同时更新 pendingTasks 和 streamingBatch
-    // 使用函数式更新确保状态一致性
-    if (pendingId) {
+    // 修复：使用 tempId 精确更新对应的 pendingTask
+    if (tempId) {
       setPendingTasks(prev => prev.map(p => 
-        p.id === pendingId 
+        p.id === tempId 
           ? { ...p, batchId: event.batch_id }
           : p
       ));
@@ -939,10 +913,19 @@ export default function Create() {
     });
   }, []);
 
-  const handleSSEComplete = useCallback(async (event: SSECompleteEvent) => {
+  // 修复：handleSSEComplete 接收 tempId 参数，用于精确清除对应的 pendingTask
+  const handleSSEComplete = useCallback(async (event: SSECompleteEvent, tempId?: string) => {
     console.log('[Create] SSE Complete:', event);
-    // 使用 batch_id 精确清除对应的 pendingTask（而不是队列）
-    setPendingTasks(prev => prev.filter(p => p.batchId !== event.batch_id));
+    
+    // 修复：使用 tempId 精确清除对应的 pendingTask
+    if (tempId) {
+      setPendingTasks(prev => prev.filter(p => p.id !== tempId));
+      pendingTaskMapRef.current.delete(tempId);
+    } else {
+      // 兼容：如果没有 tempId，使用 batch_id 清除
+      setPendingTasks(prev => prev.filter(p => p.batchId !== event.batch_id));
+    }
+    
     setIsGenerating(false);
     
     // 将流式批次移动到完成的批次列表
@@ -982,7 +965,9 @@ export default function Create() {
     type: 'single' | 'batch' | 'failed' | 'session-batch' | 'pending' | 'recovering' | 'streaming';
     item?: GenerationHistory;  // 单图时使用
     batchId?: string;          // 批次时使用
-    items?: GenerationHistory[]; // 批次时使用
+    items?: GenerationHistory[]; // 批次时使用（已加载的图片）
+    fullBatchItems?: (GenerationHistory | null)[]; // 批次时使用（完整数组，含占位）
+    batchTotal?: number;       // 批次总数
     prompt: string;
     timestamp: string | number; // 支持字符串（历史）和数字（当前会话）
     refImages?: string | string[];  // 参考图（字符串或数组）
@@ -1026,30 +1011,34 @@ export default function Create() {
           // 按 batch_index 排序
           batchItems.sort((a, b) => (a.batch_index || 0) - (b.batch_index || 0));
           
-          // 即使批次不完整也显示（部分成功的情况）
-          if (batchItems.length > 1) {
-            // 多张图片，显示为批次
-            // 参考图从第一个 item 获取（同一批次的参考图相同）
-            result.push({
-              type: 'batch',
-              batchId: item.batch_id,
-              items: batchItems,
-              prompt: batchItems[0].prompt,
-              timestamp: batchItems[0].created_at,
-              refImages: batchItems[0].ref_images,
-            });
-          } else if (batchItems.length === 1) {
-            // 只有一张图片成功，显示为单图
-            result.push({
-              type: 'single',
-              item: batchItems[0],
-              prompt: batchItems[0].prompt,
-              timestamp: batchItems[0].created_at,
-            });
+          // 修复布局偏移：只要 batch_total > 1，就始终使用批次模式渲染
+          // 即使当前只加载到 1 张图片，也要显示为网格（其他位置显示占位符）
+          // 这样可以避免 "大图 -> 网格" 的视觉跳变
+          const batchTotal = item.batch_total;
+          
+          // 构建完整的批次图片数组，未加载的位置用 null 占位
+          const fullBatchItems: (GenerationHistory | null)[] = Array(batchTotal).fill(null);
+          for (const batchItem of batchItems) {
+            const idx = batchItem.batch_index ?? 0;
+            if (idx >= 0 && idx < batchTotal) {
+              fullBatchItems[idx] = batchItem;
+            }
           }
+          
+          // 参考图从第一个 item 获取（同一批次的参考图相同）
+          result.push({
+            type: 'batch',
+            batchId: item.batch_id,
+            items: batchItems, // 保留原始 items 用于其他逻辑
+            fullBatchItems: fullBatchItems, // 新增：完整的批次数组（含占位）
+            batchTotal: batchTotal, // 新增：批次总数
+            prompt: batchItems[0].prompt,
+            timestamp: batchItems[0].created_at,
+            refImages: batchItems[0].ref_images,
+          });
         }
       } else {
-        // 单图记录
+        // 单图记录（没有 batch_id 或 batch_total <= 1）
         result.push({
           type: 'single',
           item,
@@ -1270,7 +1259,34 @@ export default function Create() {
             // 多图批次记录
             if (displayItem.type === 'batch' && displayItem.items) {
               const batchItems = displayItem.items;
-              const batchTotal = batchItems[0]?.batch_total || batchItems.length;
+              // 修复布局偏移：使用 batchTotal 而不是 batchItems.length
+              const batchTotal = displayItem.batchTotal || batchItems[0]?.batch_total || batchItems.length;
+              
+              // 修复布局偏移：构建完整的图片数组
+              // 已加载的图片显示正常，未加载的位置显示占位符（loading 状态）
+              const fullImages = displayItem.fullBatchItems 
+                ? displayItem.fullBatchItems.map((item, idx) => {
+                    if (item) {
+                      // 已加载的图片
+                      return {
+                        url: item.image_url,
+                        isLoading: false,
+                        index: item.batch_index ?? idx,
+                      };
+                    } else {
+                      // 未加载的位置，显示为 loading 占位符
+                      return {
+                        isLoading: true,
+                        index: idx,
+                      };
+                    }
+                  })
+                : batchItems.map((item, idx) => ({
+                    url: item.image_url,
+                    isLoading: false,
+                    index: item.batch_index ?? idx,
+                  }));
+              
               return (
                 <div
                     key={displayItem.batchId || `batch-${index}`}
@@ -1398,11 +1414,7 @@ export default function Create() {
                       </div>
                       <div className="w-full max-w-xl">
                         <ImageGrid
-                          images={batchItems.map((item, idx) => ({
-                            url: item.image_url,
-                            isLoading: false,
-                            index: item.batch_index ?? idx,
-                          }))}
+                          images={fullImages}
                           onImageClick={setLightboxImage}
                           onUseAsReference={handleUseAsReference}
                           prompt={displayItem.prompt}
@@ -1699,15 +1711,14 @@ export default function Create() {
         onSSEComplete={handleSSEComplete}
         // 异步任务运行状态（禁用发送按钮直到任务完成）
         isTaskRunning={isTaskRunning}
-        // 异步任务创建回调
-        onTaskCreated={(taskId) => {
-          console.log('[Create] Task created:', taskId);
+        // 修复：异步任务创建回调，接收 tempId 用于精确关联
+        onTaskCreated={(taskId, tempId) => {
+          console.log('[Create] Task created:', taskId, 'tempId:', tempId);
           setCurrentTaskId(taskId);
-          // 从队列中取出第一个 pendingTask ID，关联 taskId
-          const pendingId = pendingTaskIdQueueRef.current.shift();
-          if (pendingId) {
+          // 修复：使用 tempId 精确关联 taskId，而不是从队列中取出
+          if (tempId) {
             setPendingTasks(prev => prev.map(p => 
-              p.id === pendingId 
+              p.id === tempId 
                 ? { ...p, taskId } 
                 : p
             ));

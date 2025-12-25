@@ -155,6 +155,16 @@ func generateSingleImage(c *gin.Context, currentToken, prompt, aspectRatio, imag
 
 // processAIGeneration 在后台处理 AI 生成请求
 func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, refImagesJSON []byte, taskID string, task *models.GenerationTask) {
+	// 添加 recover 防止 goroutine panic 导致静默失败
+	defer func() {
+		if r := recover(); r != nil {
+			errMsg := fmt.Sprintf("任务处理发生 panic: %v", r)
+			utils.LogAPI("任务 %s panic: %v", taskID, r)
+			task.FailTask(errMsg)
+			config.DB.Save(task)
+		}
+	}()
+	
 	// 构建 ImageConfig（开发和生产环境都使用 gemini-3-pro-image-preview，支持 imageSize）
 	imageConfig := &types.ImageConfig{
 		AspectRatio: aspectRatio,
@@ -174,7 +184,14 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 	utils.LogJSON("Generate Request", payloadObj)
 
 	payloadBytes, _ := json.Marshal(payloadObj)
-	req, _ := http.NewRequest("POST", config.GetAIServiceURL(), bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequest("POST", config.GetAIServiceURL(), bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		errMsg := fmt.Sprintf("创建请求失败: %s", err.Error())
+		utils.LogAPI("任务 %s 创建请求失败: %s", taskID, err.Error())
+		task.FailTask(errMsg)
+		config.DB.Save(task)
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
 
@@ -498,6 +515,13 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 
 // callAIAPIForImage 调用 AI API 生成单张图片
 func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, parts []types.Part, index int) ImageResult {
+	// 添加 recover 防止 panic 导致静默失败
+	defer func() {
+		if r := recover(); r != nil {
+			utils.LogAPI("图片 %d 生成发生 panic: %v", index+1, r)
+		}
+	}()
+	
 	// 构建 ImageConfig（开发和生产环境都使用 gemini-3-pro-image-preview，支持 imageSize）
 	imageConfig := &types.ImageConfig{
 		AspectRatio: aspectRatio,
@@ -516,7 +540,11 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 	utils.LogAPIRequest("POST", config.GetAIServiceURL(), payloadObj)
 
 	payloadBytes, _ := json.Marshal(payloadObj)
-	req, _ := http.NewRequest("POST", config.GetAIServiceURL(), bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequest("POST", config.GetAIServiceURL(), bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		utils.LogAPI("图片 %d 创建请求失败: %s", index+1, err.Error())
+		return ImageResult{Error: err.Error(), Index: index}
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
 
@@ -531,16 +559,23 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 	
 	if err != nil {
 		utils.LogAPIResponse(0, requestDuration, nil, err)
+		utils.LogAPI("图片 %d 请求失败: %s (耗时: %v)", index+1, err.Error(), requestDuration)
 		return ImageResult{Error: err.Error(), Index: index}
 	}
 	defer resp.Body.Close()
 	
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		utils.LogAPI("图片 %d 读取响应失败: %s", index+1, err.Error())
+		return ImageResult{Error: "读取响应失败: " + err.Error(), Index: index}
+	}
 	
 	// 记录响应
 	var respMap map[string]interface{}
 	if err := json.Unmarshal(respBody, &respMap); err == nil {
 		utils.LogAPIResponse(resp.StatusCode, requestDuration, respMap, nil)
+	} else {
+		utils.LogAPI("图片 %d 响应解析失败: %s", index+1, err.Error())
 	}
 	
 	// 检查 API 错误
@@ -555,13 +590,18 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 			errorMessage = apiError.Error.Message
 		}
 		filteredMessage := config.FilterSensitiveInfo(errorMessage)
+		utils.LogAPI("图片 %d API 错误: %s", index+1, filteredMessage)
 		return ImageResult{Error: filteredMessage, Index: index}
 	}
 	
 	var aiResp types.AIResponse
-	json.Unmarshal(respBody, &aiResp)
+	if err := json.Unmarshal(respBody, &aiResp); err != nil {
+		utils.LogAPI("图片 %d 解析 AI 响应失败: %s", index+1, err.Error())
+		return ImageResult{Error: "解析响应失败", Index: index}
+	}
 	
 	if len(aiResp.Candidates) == 0 {
+		utils.LogAPI("图片 %d 模型未返回内容", index+1)
 		return ImageResult{Error: "模型未返回内容", Index: index}
 	}
 	
@@ -572,15 +612,22 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 			if err == nil {
 				fileName := fmt.Sprintf("gen_%d.png", time.Now().UnixNano())
 				savePath := filepath.Join(config.OutputDir, fileName)
-				os.WriteFile(savePath, imgData, 0644)
+				if err := os.WriteFile(savePath, imgData, 0644); err != nil {
+					utils.LogAPI("图片 %d 保存失败: %s", index+1, err.Error())
+					return ImageResult{Error: "保存图片失败", Index: index}
+				}
 				
 				// 存储相对路径，读取时动态拼接当前端口
 				relativeImageURL := fmt.Sprintf("images/%s", fileName)
+				utils.LogAPI("图片 %d 生成成功: %s (耗时: %v)", index+1, relativeImageURL, requestDuration)
 				return ImageResult{ImageURL: relativeImageURL, Index: index}
+			} else {
+				utils.LogAPI("图片 %d 解码 base64 失败: %s", index+1, err.Error())
 			}
 		}
 	}
 	
+	utils.LogAPI("图片 %d 未找到图片数据", index+1)
 	return ImageResult{Error: "图片生成失败", Index: index}
 }
 
