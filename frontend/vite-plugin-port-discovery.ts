@@ -48,7 +48,7 @@ function readBackendPort(portFile: string): number | null {
     }
     
     return port;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

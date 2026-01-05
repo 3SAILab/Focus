@@ -1,8 +1,8 @@
 {
-  "versionCode": "202512221621",
-  "versionName": "1.0.2",
+  "versionCode": "202601051846",
+  "versionName": "1.0.5",
   "updateContent": "1. 添加删除功能\n2. 优化了用户体验",
   "windowsUrl": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-1.0.2.zip",
-  "macX64Url": "",
-  "macArm64Url": ""
+  "macX64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-1.0.2-x64.zip",
+  "macArm64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-1.0.2-arm64.zip"
 }

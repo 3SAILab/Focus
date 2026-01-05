@@ -1,11 +1,12 @@
 {
   "name": "focus",
-  "version": "1.0.2",
-  "versionCode": "202512221621",
+  "version": "1.0.5",
+  "versionCode": "202601051846",
   "description": "Focus AI Image Generation Tool - Beta版",
   "main": "electron/main.js",
   "scripts": {
     "dev": "cross-env NODE_ENV=development electron .",
+    
     "build": "npm run build:win-x64",
     "build:win-x64": "npm run build:frontend && npm run build:backend:win && npm run validate:build && npm run dist:win-x64",
     "build:sequential": "npm run build:frontend && npm run build:backend:win && npm run validate:build && npm run build:electron",
@@ -37,7 +38,7 @@
   "build": {
     "appId": "com.focus.app",
     "productName": "Focus",
-    "copyright": "Copyright © 2025 希革马（宁波市）人工智能有限责任公司 保留所有权利",
+    "copyright": "Copyright © 2026 希革马（宁波市）人工智能有限责任公司 保留所有权利",
     "directories": {
       "output": "release-dev-test",
       "buildResources": "assets"

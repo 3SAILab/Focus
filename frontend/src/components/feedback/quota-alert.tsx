@@ -1,13 +1,14 @@
 import { AlertTriangle, Phone } from 'lucide-react';
-import Modal from './common/Modal';
+import { Modal } from '../ui/modal';
+import { ContactModal } from './service-modal';
 
-interface QuotaErrorAlertProps {
+export interface QuotaAlertProps {
   isOpen: boolean;
   onClose: () => void;
   onContactSales: () => void;
 }
 
-export default function QuotaErrorAlert({ isOpen, onClose, onContactSales }: QuotaErrorAlertProps) {
+export function QuotaAlert({ isOpen, onClose, onContactSales }: QuotaAlertProps) {
   return (
     <Modal
       isOpen={isOpen}
@@ -50,3 +51,35 @@ export default function QuotaErrorAlert({ isOpen, onClose, onContactSales }: Quo
     </Modal>
   );
 }
+
+export interface QuotaErrorHandlerProps {
+  showQuotaError: boolean;
+  showContact: boolean;
+  onQuotaErrorClose: () => void;
+  onContactClose: () => void;
+  onContactSales: () => void;
+}
+
+export function QuotaErrorHandler({
+  showQuotaError,
+  showContact,
+  onQuotaErrorClose,
+  onContactClose,
+  onContactSales,
+}: QuotaErrorHandlerProps) {
+  return (
+    <div data-testid="quota-error-handler">
+      <QuotaAlert
+        isOpen={showQuotaError}
+        onClose={onQuotaErrorClose}
+        onContactSales={onContactSales}
+      />
+      <ContactModal
+        isOpen={showContact}
+        onClose={onContactClose}
+      />
+    </div>
+  );
+}
+
+export default QuotaAlert;

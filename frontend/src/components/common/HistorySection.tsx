@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
 import type { GenerationHistory, GenerationTask } from '../../type';
+import type { PendingTaskInfo } from '../../hooks/useAsyncGeneration';
 import PlaceholderCard from '../PlaceholderCard';
 import ImageContextMenu from '../ImageContextMenu';
 import { formatTime } from '../../utils';
-import type { PendingTaskInfo } from '../../hooks/useAsyncGeneration';
 
 // 统一的显示项类型，用于合并排序
 interface DisplayItem {

@@ -201,6 +201,55 @@ toast.warning('警告信息');
 toast.info('提示信息');
 ```
 
+### GlobalTaskContext
+
+管理异步任务状态，支持跨页面任务恢复：
+
+```typescript
+const {
+  registerTask,        // 注册新任务
+  unregisterTask,      // 取消任务
+  getCompletedTask,    // 获取已完成任务
+  getFailedTask,       // 获取失败任务
+  clearCompletedTask,  // 清除完成状态
+  clearFailedTask,     // 清除失败状态
+  isTaskPolling        // 检查任务是否在轮询
+} = useGlobalTask();
+```
+
+## 多图生成状态管理
+
+### tempId 机制
+
+为解决并发请求的竞态条件，使用 tempId 显式关联请求和响应：
+
+```typescript
+// 1. handleGenerateStart 生成并返回 tempId
+const tempId = handleGenerateStart(prompt, imageCount);
+
+// 2. 请求完成时通过 tempId 精确清除对应的 pendingTask
+if (tempId) {
+  setPendingTasks(prev => prev.filter(p => p.id !== tempId));
+}
+```
+
+### 布局稳定性
+
+批次任务始终使用网格模式渲染，避免布局偏移：
+
+```typescript
+// 构建完整的批次图片数组，未加载的位置用 null 占位
+const fullBatchItems = Array(batchTotal).fill(null);
+for (const item of batchItems) {
+  fullBatchItems[item.batch_index] = item;
+}
+
+// 渲染时，null 位置显示 loading 占位符
+const images = fullBatchItems.map((item, idx) => 
+  item ? { url: item.image_url, isLoading: false } : { isLoading: true }
+);
+```
+
 ## API 调用
 
 使用 `api` 对象进行后端调用：

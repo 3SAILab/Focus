@@ -5,16 +5,16 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { api } from '../api';
-import type { GenerationTask, GenerationTypeValue } from '../type';
+import type { GenerationTask, GenerationTypeValue, GenerationItem } from '../type';
+import { createPendingItem } from '../type';
 import { useGlobalTask } from '../context/GlobalTaskContext';
 import { getErrorMessage } from '../utils/errorHandler';
 
-// 正在处理的任务信息
-export interface PendingTaskInfo {
-  id: string;           // 本地唯一 ID
-  taskId?: string;      // 后端返回的 task_id（用于精确匹配）
-  timestamp: number;    // 创建时间戳
-}
+/**
+ * @deprecated 使用 GenerationItem 代替
+ * 保留此类型别名以保持向后兼容
+ */
+export type PendingTaskInfo = Pick<GenerationItem, 'id' | 'taskId' | 'timestamp'>;
 
 export interface UseAsyncGenerationOptions {
   onComplete: (task: GenerationTask) => void;
@@ -45,7 +45,8 @@ export function useAsyncGeneration(options: UseAsyncGenerationOptions): UseAsync
   const { registerTask, unregisterTask, isTaskPolling, getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask } = useGlobalTask();
   
   // 多任务支持：使用数组存储所有正在处理的任务
-  const [pendingTasks, setPendingTasks] = useState<PendingTaskInfo[]>([]);
+  // 内部使用 GenerationItem，但只暴露 PendingTaskInfo 兼容的字段
+  const [pendingTasks, setPendingTasks] = useState<GenerationItem[]>([]);
   
   // 向后兼容：isGenerating 表示是否有任何任务在处理
   const isGenerating = pendingTasks.length > 0;
@@ -79,10 +80,15 @@ export function useAsyncGeneration(options: UseAsyncGenerationOptions): UseAsync
     // 创建新的本地任务，使用时间戳确保唯一性和排序
     const timestamp = Date.now();
     const localId = 'pending-' + timestamp + '-' + Math.random().toString(36).substring(2, 11);
-    const newTask: PendingTaskInfo = {
+    
+    // 使用统一的 createPendingItem 工厂函数
+    const newTask = createPendingItem({
       id: localId,
+      prompt: formData.get('prompt') as string || '',
+      imageCount: parseInt(formData.get('imageCount') as string || '1', 10),
       timestamp: timestamp,
-    };
+      type: formData.get('type') as GenerationTypeValue,
+    });
     
     // 添加到待处理列表
     setPendingTasks(prev => [...prev, newTask]);

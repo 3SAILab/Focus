@@ -26,19 +26,19 @@ backend/
 │   └── config_test.go   # 配置测试
 ├── handlers/            # HTTP 处理器
 │   ├── config.go        # 配置接口
-│   ├── generate.go      # 生成接口
+│   ├── generate.go      # 生成接口（支持单图/多图、SSE 流式返回）
 │   ├── history.go       # 历史接口（含批量删除）
 │   ├── stats.go         # 统计接口
 │   └── task.go          # 任务接口
 ├── models/              # 数据模型
-│   ├── generation_history.go
-│   ├── generation_stats.go
-│   └── generation_task.go
+│   ├── generation_history.go  # 历史记录（含批次信息）
+│   ├── generation_stats.go    # 统计数据
+│   └── generation_task.go     # 异步任务
 ├── types/               # 类型定义
 │   └── ai_types.go      # AI API 类型
 └── utils/               # 工具函数
     ├── env.go           # 环境变量工具
-    ├── logger.go        # 日志工具
+    ├── logger.go        # 日志工具（API 请求/响应日志）
     └── port.go          # 端口管理（自动端口发现）
 ```
 
@@ -183,3 +183,46 @@ go build -trimpath -ldflags="-s -w -buildid=" -o sigma-backend.exe .
 2. 在 `main.go` 添加自动迁移
 3. 更新模型文档
 4. 编写测试
+
+## 多图生成
+
+### 单图模式 (count=1)
+
+异步模式，立即返回 `task_id`，后台处理：
+
+```go
+// POST /generate
+// 返回: { "status": "processing", "task_id": "xxx" }
+// 前端轮询 GET /task/:id 获取结果
+```
+
+### 多图模式 (count>1)
+
+SSE 流式返回，实时推送每张图片的生成状态：
+
+```go
+// POST /generate (count=2,3,4)
+// SSE 事件流:
+// event: message
+// data: {"type":"start","batch_id":"xxx","count":4}
+//
+// event: message  
+// data: {"type":"image","index":0,"image_url":"xxx"}
+//
+// event: message
+// data: {"type":"complete","status":"success","images":[...]}
+```
+
+### Panic 恢复
+
+所有 goroutine 都添加了 panic 恢复，避免静默失败：
+
+```go
+defer func() {
+    if r := recover(); r != nil {
+        utils.LogAPI("任务 %s panic: %v", taskID, r)
+        task.FailTask(fmt.Sprintf("任务处理发生 panic: %v", r))
+        config.DB.Save(task)
+    }
+}()
+```

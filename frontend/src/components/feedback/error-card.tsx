@@ -1,13 +1,13 @@
 import { AlertTriangle, RotateCw } from 'lucide-react';
 
-interface ErrorCardProps {
+export interface ErrorCardProps {
   errorMessage: string;
   prompt?: string;
   onRetry?: () => void;
   disabled?: boolean;
 }
 
-export default function ErrorCard({ errorMessage, prompt, onRetry, disabled = false }: ErrorCardProps) {
+export function ErrorCard({ errorMessage, prompt, onRetry, disabled = false }: ErrorCardProps) {
   return (
     <div className="masonry-card bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
       {/* 错误图标区域 */}
@@ -44,3 +44,5 @@ export default function ErrorCard({ errorMessage, prompt, onRetry, disabled = fa
     </div>
   );
 }
+
+export default ErrorCard;

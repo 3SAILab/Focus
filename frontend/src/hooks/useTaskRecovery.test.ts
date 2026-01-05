@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import * as fc from 'fast-check';
-import type { GenerationTask, TaskStatus, GenerationTypeValue } from '../type';
+import type { TaskStatus } from '../type';
 
 /**
  * Property test for useTaskRecovery polling termination

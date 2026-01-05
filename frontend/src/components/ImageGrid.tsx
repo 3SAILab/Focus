@@ -88,7 +88,7 @@ function GridImageCard({
       if (saved) {
         toast.success('图片保存成功');
       }
-    } catch (error) {
+    } catch {
       toast.error('保存失败，请稍后重试');
     }
   };

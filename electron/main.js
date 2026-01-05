@@ -4,8 +4,14 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const versionChecker = require('./versionChecker');
 
-// 创建中文菜单
-function createChineseMenu() {
+// ============ 开发环境日志开关 ============
+// 设置为 true 启用开发环境日志（控制台 + 文件）
+// 设置为 false 禁用所有日志
+const ENABLE_DEV_LOG = true;
+// =========================================
+
+// 创建中文菜单（传入 isDev 参数控制开发者工具显示）
+function createChineseMenu(showDevTools = false) {
   const isMac = process.platform === 'darwin';
   
   const template = [
@@ -67,8 +73,11 @@ function createChineseMenu() {
         { label: '重新加载', role: 'reload', accelerator: 'CmdOrCtrl+R' },
         { label: '强制重新加载', role: 'forceReload', accelerator: 'CmdOrCtrl+Shift+R' },
         { type: 'separator' },
-        { label: '开发者工具', role: 'toggleDevTools', accelerator: 'F12' },
-        { type: 'separator' },
+        // 仅开发环境显示开发者工具
+        ...(showDevTools ? [
+          { label: '开发者工具', role: 'toggleDevTools', accelerator: 'F12' },
+          { type: 'separator' },
+        ] : []),
         { label: '实际大小', role: 'resetZoom', accelerator: 'CmdOrCtrl+0' },
         { label: '放大', role: 'zoomIn', accelerator: 'CmdOrCtrl+Plus' },
         { label: '缩小', role: 'zoomOut', accelerator: 'CmdOrCtrl+-' },
@@ -140,43 +149,45 @@ const originalLog = console.log;
 const originalError = console.error;
 const originalWarn = console.warn;
 
+// 计算是否启用日志：开发环境 + 日志开关开启
+function shouldEnableLog() {
+  return isDev && ENABLE_DEV_LOG;
+}
+
 // Initialize logging function (will be called after app.whenReady())
 function initializeLogging() {
-  // 始终启用日志写入文件（用于调试 API 问题）
-  // 但生产环境不输出到控制台
+  // 仅开发环境且日志开关开启时启用日志
+  // 生产环境或日志开关关闭时完全禁用日志
   
   console.log = function(...args) {
-    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
-    const timestamp = new Date().toISOString();
-    if (logStream) {
-      logStream.write(`[${timestamp}] [LOG] ${message}\n`);
-    }
-    // 仅开发环境输出到控制台
-    if (isDev) {
+    if (shouldEnableLog()) {
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+      const timestamp = new Date().toISOString();
+      if (logStream) {
+        logStream.write(`[${timestamp}] [LOG] ${message}\n`);
+      }
       originalLog.apply(console, args);
     }
   };
 
   console.error = function(...args) {
-    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
-    const timestamp = new Date().toISOString();
-    if (logStream) {
-      logStream.write(`[${timestamp}] [ERROR] ${message}\n`);
-    }
-    // 仅开发环境输出到控制台
-    if (isDev) {
+    if (shouldEnableLog()) {
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+      const timestamp = new Date().toISOString();
+      if (logStream) {
+        logStream.write(`[${timestamp}] [ERROR] ${message}\n`);
+      }
       originalError.apply(console, args);
     }
   };
 
   console.warn = function(...args) {
-    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
-    const timestamp = new Date().toISOString();
-    if (logStream) {
-      logStream.write(`[${timestamp}] [WARN] ${message}\n`);
-    }
-    // 仅开发环境输出到控制台
-    if (isDev) {
+    if (shouldEnableLog()) {
+      const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : arg).join(' ');
+      const timestamp = new Date().toISOString();
+      if (logStream) {
+        logStream.write(`[${timestamp}] [WARN] ${message}\n`);
+      }
       originalWarn.apply(console, args);
     }
   };
@@ -312,8 +323,8 @@ async function startBackend() {
       DB_PATH: path.join(directories.db, 'history.db'),
       PORT: DEFAULT_BACKEND_PORT.toString(),
       LOG_DIR: directories.logs,
-      // 启用 API 日志记录
-      ENABLE_API_LOG: 'true',
+      // 仅开发环境且日志开关开启时启用 API 日志记录
+      ENABLE_API_LOG: (isDev && ENABLE_DEV_LOG) ? 'true' : 'false',
       // 启用自动端口发现
       AUTO_PORT_DISCOVERY: 'true',
       // 生产环境标识（打包后的应用使用生产模型）
@@ -568,8 +579,8 @@ function checkBackendHealth(retryCount = 0) {
 function createWindow() {
   console.log('[Window] 创建主窗口...');
   
-  // 设置中文菜单
-  const menu = createChineseMenu();
+  // 设置中文菜单（传入 isDev 控制开发者工具显示）
+  const menu = createChineseMenu(isDev);
   Menu.setApplicationMenu(menu);
   console.log('[Window] ✓ 中文菜单已设置');
   
@@ -583,7 +594,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: false,  // 禁用 web 安全策略，解决跨域和本地文件加载问题
-      devTools: true,      // 始终启用开发者工具（可通过 F12 或 Ctrl+Shift+I 打开）
+      devTools: isDev,     // 仅开发环境启用开发者工具
     },
   };
   
@@ -651,16 +662,135 @@ function createWindow() {
   console.log('[Window] ✓ 主窗口创建完成');
 }
 
-// 获取应用数据目录（使用安装路径而不是 AppData）
+// 获取应用数据目录
+// 生产环境使用 AppData 目录（有写入权限），开发环境使用项目目录
 function getAppDataPath() {
   if (isDev) {
     // 开发模式：使用项目根目录下的 data 文件夹
     return path.join(__dirname, '..', 'data');
   } else {
-    // 生产模式：使用安装目录下的 data 文件夹
-    // process.resourcesPath 指向 resources 目录，向上一级就是安装目录
+    // 生产模式：使用 AppData 目录（C:\Users\<用户名>\AppData\Roaming\Focus\）
+    // 这是 Windows 推荐的用户数据存储位置，有完整的写入权限
+    // 注意：Program Files 目录是受保护的，普通用户无法写入
+    return app.getPath('userData');
+  }
+}
+
+// 数据迁移：从旧安装目录迁移到 AppData
+// 旧版本数据可能存储在安装目录下的 data 文件夹
+function migrateOldData(newDataPath) {
+  // 仅在生产环境执行迁移
+  if (isDev) {
+    console.log('[Migration] 开发模式，跳过数据迁移');
+    return;
+  }
+  
+  try {
+    // 获取可能的旧数据目录（安装目录下的 data 文件夹）
+    // process.resourcesPath 指向 resources 目录（如 C:\Program Files\Focus\resources）
+    // 其父目录就是安装目录（如 C:\Program Files\Focus）
     const installDir = path.dirname(process.resourcesPath);
-    return path.join(installDir, 'data');
+    const oldDataPath = path.join(installDir, 'data');
+    
+    console.log('[Migration] process.resourcesPath:', process.resourcesPath);
+    console.log('[Migration] 安装目录:', installDir);
+    console.log('[Migration] 检查旧数据目录:', oldDataPath);
+    console.log('[Migration] 新数据目录:', newDataPath);
+    
+    // 检查旧数据目录是否存在
+    if (!fs.existsSync(oldDataPath)) {
+      console.log('[Migration] 旧数据目录不存在，无需迁移');
+      return;
+    }
+    
+    // 检查旧数据目录是否有内容
+    const oldFiles = fs.readdirSync(oldDataPath);
+    if (oldFiles.length === 0) {
+      console.log('[Migration] 旧数据目录为空，无需迁移');
+      // 删除空的旧目录
+      try {
+        fs.rmdirSync(oldDataPath);
+        console.log('[Migration] 已删除空的旧数据目录');
+      } catch (e) {
+        console.warn('[Migration] 删除空目录失败:', e.message);
+      }
+      return;
+    }
+    
+    // 检查新数据目录是否已有数据库（避免覆盖）
+    const newDbPath = path.join(newDataPath, 'db', 'history.db');
+    if (fs.existsSync(newDbPath)) {
+      console.log('[Migration] 新数据目录已有数据库，跳过迁移');
+      return;
+    }
+    
+    console.log('[Migration] 开始迁移数据...');
+    console.log('[Migration] 旧目录内容:', oldFiles);
+    
+    // 递归复制目录
+    const copyRecursive = (src, dest) => {
+      if (!fs.existsSync(dest)) {
+        fs.mkdirSync(dest, { recursive: true });
+      }
+      
+      const entries = fs.readdirSync(src, { withFileTypes: true });
+      for (const entry of entries) {
+        const srcPath = path.join(src, entry.name);
+        const destPath = path.join(dest, entry.name);
+        
+        if (entry.isDirectory()) {
+          copyRecursive(srcPath, destPath);
+        } else {
+          try {
+            fs.copyFileSync(srcPath, destPath);
+            console.log('[Migration] 复制文件成功:', entry.name);
+          } catch (copyErr) {
+            console.error('[Migration] 复制文件失败:', entry.name, copyErr.message);
+          }
+        }
+      }
+    };
+    
+    // 执行复制
+    copyRecursive(oldDataPath, newDataPath);
+    console.log('[Migration] ✓ 数据迁移完成');
+    
+    // 删除旧数据目录
+    const deleteRecursive = (dirPath) => {
+      if (fs.existsSync(dirPath)) {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dirPath, entry.name);
+          if (entry.isDirectory()) {
+            deleteRecursive(fullPath);
+          } else {
+            try {
+              fs.unlinkSync(fullPath);
+            } catch (unlinkErr) {
+              console.warn('[Migration] 删除文件失败:', fullPath, unlinkErr.message);
+            }
+          }
+        }
+        try {
+          fs.rmdirSync(dirPath);
+        } catch (rmdirErr) {
+          console.warn('[Migration] 删除目录失败:', dirPath, rmdirErr.message);
+        }
+      }
+    };
+    
+    try {
+      deleteRecursive(oldDataPath);
+      console.log('[Migration] ✓ 旧数据目录已删除');
+    } catch (deleteError) {
+      console.warn('[Migration] 删除旧数据目录失败:', deleteError.message);
+      console.warn('[Migration] 用户可以手动删除:', oldDataPath);
+    }
+    
+  } catch (error) {
+    console.error('[Migration] 数据迁移失败:', error.message);
+    console.error('[Migration] 错误堆栈:', error.stack);
+    // 迁移失败不应阻止应用启动
   }
 }
 
@@ -676,13 +806,18 @@ app.whenReady().then(async () => {
     fs.mkdirSync(userDataPath, { recursive: true });
   }
   
-  // Initialize logging (始终启用，用于调试 API 问题)
-  const logsDir = path.join(userDataPath, 'logs');
-  if (!fs.existsSync(logsDir)) {
-    fs.mkdirSync(logsDir, { recursive: true });
+  // 数据迁移：从旧安装目录迁移到 AppData
+  migrateOldData(userDataPath);
+  
+  // Initialize logging (仅开发环境且日志开关开启时启用)
+  if (isDev && ENABLE_DEV_LOG) {
+    const logsDir = path.join(userDataPath, 'logs');
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+    logPath = path.join(logsDir, 'app.log');
+    logStream = fs.createWriteStream(logPath, { flags: 'a' });
   }
-  logPath = path.join(logsDir, 'app.log');
-  logStream = fs.createWriteStream(logPath, { flags: 'a' });
   initializeLogging();
   
   console.log('[App] Electron application ready');
@@ -690,9 +825,10 @@ app.whenReady().then(async () => {
   console.log('[App] Architecture:', process.arch);
   console.log('[App] Is packaged:', app.isPackaged);
   console.log('[App] Development mode:', isDev);
+  console.log('[App] Log enabled:', ENABLE_DEV_LOG);
   console.log('[App] User data directory:', userDataPath);
   console.log('[App] Install directory:', isDev ? 'N/A (dev mode)' : path.dirname(process.resourcesPath));
-  console.log('[App] Log file path:', logPath);
+  console.log('[App] Log file path:', logPath || 'disabled');
   
   try {
     createWindow();
@@ -717,6 +853,7 @@ app.whenReady().then(async () => {
     }
   });
 });
+
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

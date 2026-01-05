@@ -44,7 +44,7 @@ export function readBackendPort(): number | null {
     }
     
     return port;
-  } catch (error) {
+  } catch {
     // Handle any file read errors gracefully
     return null;
   }

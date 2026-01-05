@@ -13,6 +13,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [imageRect, setImageRect] = useState<DOMRect | null>(null);
   
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -84,12 +85,15 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // 在事件处理时获取 imageRect，而不是在渲染时
+    setImageRect(imgRef.current?.getBoundingClientRect() ?? null);
     setContextMenuPosition({ x: e.clientX, y: e.clientY });
   };
 
   // 关闭右键菜单
   const closeContextMenu = () => {
     setContextMenuPosition(null);
+    setImageRect(null);
   };
 
   // 点击背景关闭 lightbox 和菜单
@@ -142,7 +146,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
       <ImageContextMenu
         imageUrl={imageUrl}
         position={contextMenuPosition}
-        imageRect={imgRef.current?.getBoundingClientRect()}
+        imageRect={imageRect}
         onClose={closeContextMenu}
       />
     </div>

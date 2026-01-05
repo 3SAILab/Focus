@@ -66,7 +66,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   const handleApiKeySuccess = () => {
     setHasApiKey(true);
-    setShowApiKeyModal(false);
+    // 不自动关闭 Modal，让用户手动关闭
+    // 这样用户可以看到新 Key 的信息
   };
 
   const handleDisclaimerAgree = async () => {

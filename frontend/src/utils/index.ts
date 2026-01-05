@@ -32,7 +32,7 @@ export function formatTime(dateString: string): string {
       hour: '2-digit',
       minute: '2-digit',
     });
-  } catch (e) {
+  } catch {
     return '';
   }
 }
@@ -63,7 +63,7 @@ export function formatDate(dateString: string): string {
       const day = date.getDate();
       return `${month}月${day}日`;
     }
-  } catch (e) {
+  } catch {
     return dateString;
   }
 }

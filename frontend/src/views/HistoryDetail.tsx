@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import Lightbox from '../components/Lightbox';
 import ImageCard from '../components/ImageCard';
-import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
+import { AlertDialog } from '../components/ui/alert-dialog';
 import type { GenerationHistory } from '../type';
 import { api } from '../api';
 import { formatDate } from '../utils';
@@ -132,13 +132,15 @@ export default function HistoryDetail() {
       <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
       
       {/* 删除确认对话框 */}
-      <DeleteConfirmDialog
+      <AlertDialog
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
         title="确认删除"
-        message="确定要删除这条记录吗？删除后将无法恢复，但不会影响生成次数统计。"
-        isDeleting={isDeleting}
+        description="确定要删除这条记录吗？删除后将无法恢复，但不会影响生成次数统计。"
+        confirmText="确认删除"
+        variant="destructive"
+        isLoading={isDeleting}
       />
     </>
   );

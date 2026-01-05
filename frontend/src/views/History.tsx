@@ -5,7 +5,7 @@ import type { GenerationHistory } from '../type';
 import { api } from '../api';
 import { formatDate } from '../utils';
 import { PageHeader } from '../components/common';
-import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
+import { AlertDialog } from '../components/ui/alert-dialog';
 import { useToast } from '../context/ToastContext';
 
 export default function History() {
@@ -158,13 +158,15 @@ export default function History() {
       </div>
 
       {/* 删除确认对话框 */}
-      <DeleteConfirmDialog
+      <AlertDialog
         isOpen={!!deleteDate}
         onClose={() => setDeleteDate(null)}
         onConfirm={handleDeleteConfirm}
         title="确认删除"
-        message={`确定要删除 ${deleteDate ? formatDate(deleteDate) : ''} 的所有记录吗？删除后将无法恢复，图片文件也会被删除，但不会影响生成次数统计。`}
-        isDeleting={isDeleting}
+        description={`确定要删除 ${deleteDate ? formatDate(deleteDate) : ''} 的所有记录吗？删除后将无法恢复，图片文件也会被删除，但不会影响生成次数统计。`}
+        confirmText="确认删除"
+        variant="destructive"
+        isLoading={isDeleting}
       />
     </>
   );

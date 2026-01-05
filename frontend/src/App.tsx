@@ -6,7 +6,6 @@ import { ToastProvider } from './context/ToastContext';
 import { ConfigProvider } from './context/ConfigContext';
 import { GlobalTaskProvider } from './context/GlobalTaskContext';
 import { VersionProvider, useVersion } from './context/VersionContext';
-import { BalanceProvider } from './context/BalanceContext';
 
 // Inner component that conditionally renders based on version check
 function AppContent() {
@@ -38,9 +37,7 @@ function AppContent() {
   return (
     <GlobalTaskProvider>
       <ConfigProvider>
-        <BalanceProvider>
-          <RouterProvider router={router} />
-        </BalanceProvider>
+        <RouterProvider router={router} />
       </ConfigProvider>
     </GlobalTaskProvider>
   );

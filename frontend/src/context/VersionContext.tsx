@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import type { VersionCheckResult, RemoteVersionInfo } from '../types/electron';
 import UpdateModal from '../components/UpdateModal';
-import NetworkErrorModal from '../components/NetworkErrorModal';
+import { NetworkErrorModal } from '../components/feedback/network-error';
 
 type VersionStatus = 'checking' | 'network_error' | 'fetch_error' | 'update_required' | 'up_to_date';
 

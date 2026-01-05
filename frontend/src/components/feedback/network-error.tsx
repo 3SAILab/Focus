@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { WifiOff, RefreshCw, Loader2 } from 'lucide-react';
-import Modal from './common/Modal';
+import { Modal } from '../ui/modal';
 
-interface NetworkErrorModalProps {
+export interface NetworkErrorModalProps {
   isOpen: boolean;
   errorMessage: string;
   onRetry: () => Promise<void>;
 }
 
-export default function NetworkErrorModal({
+export function NetworkErrorModal({
   isOpen,
   errorMessage,
   onRetry,
@@ -73,3 +73,5 @@ export default function NetworkErrorModal({
     </Modal>
   );
 }
+
+export default NetworkErrorModal;

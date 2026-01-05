@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Sparkles, PenTool, History, ImageIcon, Shield, MessageCircle, Settings, CheckCircle, Shirt, Star, ShoppingBag, Package, Sun, ChevronRight } from 'lucide-react';
 import DisclaimerModal from '../components/DisclaimerModal';
-import ContactModal from '../components/ContactModal';
-import SalesModal from '../components/SalesModal';
+import { ContactModal, SalesModal } from '../components/feedback/service-modal';
 import { useConfig } from '../context/ConfigContext';
 
 // 电商处理子菜单路径

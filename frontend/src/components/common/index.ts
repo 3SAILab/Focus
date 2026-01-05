@@ -13,5 +13,8 @@ export type { ImageUploadZoneProps } from './ImageUploadZone';
 export { default as HistorySection } from './HistorySection';
 export type { HistorySectionProps } from './HistorySection';
 
-export { default as QuotaErrorHandler } from './QuotaErrorHandler';
-export type { QuotaErrorHandlerProps } from './QuotaErrorHandler';
+export { default as GenerationViewFooter } from './GenerationViewFooter';
+export type { GenerationViewFooterProps, ContextMenuState } from './GenerationViewFooter';
+
+export { default as GenerationResultArea } from './GenerationResultArea';
+export type { GenerationResultAreaProps } from './GenerationResultArea';

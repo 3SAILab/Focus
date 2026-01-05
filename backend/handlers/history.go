@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"sigma/config"
 	"sigma/models"
 	"sigma/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
 // convertHistoryToResponse 将历史记录转换为响应格式，同时转换 URL
@@ -21,7 +22,7 @@ func convertHistoryToResponse(history []models.GenerationHistory) []models.Gener
 		// 转换 URL 为当前端口的绝对路径（兼容旧数据和新数据）
 		imageURL := utils.ToAbsoluteURL(h.ImageURL, config.ServerPort)
 		refImages := utils.ConvertRefImagesJSON(h.RefImages, config.ServerPort, false)
-		
+
 		response[i] = models.GenerationHistoryResponse{
 			ID:             h.ID,
 			Prompt:         h.Prompt,
@@ -94,7 +95,6 @@ func HistoryHandler(c *gin.Context) {
 
 	c.JSON(200, convertHistoryToResponse(history))
 }
-
 
 // WhiteBackgroundHistoryHandler 获取白底图历史记录
 func WhiteBackgroundHistoryHandler(c *gin.Context) {
@@ -189,16 +189,18 @@ func deleteImageFile(imageURL string) {
 	if imageURL == "" {
 		return
 	}
-	
-	log.Printf("尝试删除图片文件，URL: %s", imageURL)
-	
+
+	if !config.IsProduction {
+		log.Printf("尝试删除图片文件，URL: %s", imageURL)
+	}
+
 	// 从 URL 中提取文件名
 	// 数据库中存储的格式可能是:
 	// 1. 相对路径: images/xxx.png
 	// 2. 完整 URL: http://localhost:8080/images/xxx.png
 	// 3. 带斜杠的路径: /images/xxx.png
 	var fileName string
-	
+
 	if strings.HasPrefix(imageURL, "images/") {
 		// 相对路径格式: images/xxx.png
 		fileName = strings.TrimPrefix(imageURL, "images/")
@@ -209,25 +211,35 @@ func deleteImageFile(imageURL string) {
 			fileName = parts[len(parts)-1]
 		}
 	}
-	
+
 	if fileName == "" {
-		log.Printf("无法从 URL 提取文件名: %s", imageURL)
+		if !config.IsProduction {
+			log.Printf("无法从 URL 提取文件名: %s", imageURL)
+		}
 		return
 	}
-	
+
 	// 构建完整文件路径
 	filePath := filepath.Join(config.OutputDir, fileName)
-	log.Printf("准备删除文件: %s", filePath)
-	
+	if !config.IsProduction {
+		log.Printf("准备删除文件: %s", filePath)
+	}
+
 	// 删除文件
 	if err := os.Remove(filePath); err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("文件不存在，跳过删除: %s", filePath)
+			if !config.IsProduction {
+				log.Printf("文件不存在，跳过删除: %s", filePath)
+			}
 		} else {
-			log.Printf("删除图片文件失败: %s, 错误: %v", filePath, err)
+			if !config.IsProduction {
+				log.Printf("删除图片文件失败: %s, 错误: %v", filePath, err)
+			}
 		}
 	} else {
-		log.Printf("成功删除文件: %s", filePath)
+		if !config.IsProduction {
+			log.Printf("成功删除文件: %s", filePath)
+		}
 	}
 }
 
@@ -266,7 +278,7 @@ func BatchDeleteHistoryHandler(c *gin.Context) {
 	var req struct {
 		IDs []uint `json:"ids" binding:"required"`
 	}
-	
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "无效的请求参数"})
 		return
@@ -280,7 +292,7 @@ func BatchDeleteHistoryHandler(c *gin.Context) {
 	// 先查询要删除的记录，获取图片 URL
 	var histories []models.GenerationHistory
 	config.DB.Where("id IN ?", req.IDs).Find(&histories)
-	
+
 	// 删除图片文件
 	for _, h := range histories {
 		deleteImageFile(h.ImageURL)
@@ -342,35 +354,35 @@ func DeleteHistoryByBatchHandler(c *gin.Context) {
 // DeleteHistoryByDateHandler 按日期删除历史记录
 func DeleteHistoryByDateHandler(c *gin.Context) {
 	dateStr := c.Param("date")
-	
+
 	// 解析日期
 	parsedDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的日期格式，请使用 YYYY-MM-DD"})
 		return
 	}
-	
+
 	startOfDay := parsedDate
 	endOfDay := parsedDate.Add(24 * time.Hour)
-	
+
 	// 先查询要删除的记录，获取图片 URL
 	var histories []models.GenerationHistory
 	config.DB.Where("created_at >= ? AND created_at < ?", startOfDay, endOfDay).Find(&histories)
-	
+
 	if len(histories) == 0 {
 		c.JSON(404, gin.H{"error": "该日期没有记录"})
 		return
 	}
-	
+
 	// 删除图片文件
 	for _, h := range histories {
 		deleteImageFile(h.ImageURL)
 	}
-	
+
 	// 批量软删除
 	result := config.DB.Where("created_at >= ? AND created_at < ?", startOfDay, endOfDay).
 		Delete(&models.GenerationHistory{})
-	
+
 	if result.Error != nil {
 		c.JSON(500, gin.H{"error": "删除记录失败"})
 		return

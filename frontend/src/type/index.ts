@@ -102,3 +102,14 @@ export interface GenerationTask {
   updated_at: string;
   image_count: number; // 请求生成的图片数量 (1-4)
 }
+
+
+// 导出统一的生成类型
+export { 
+  type GenerationStatus, 
+  type GenerationItem,
+  type BatchResult,
+  createPendingItem, 
+  fromBackendTask,
+  createBatchResult,
+} from './generation';

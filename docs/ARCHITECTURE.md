@@ -192,6 +192,70 @@ stateDiagram-v2
     end note
 ```
 
+### 多图生成流程 (SSE)
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant F as 前端
+    participant B as 后端
+    participant G as Gemini API
+    
+    U->>F: 点击生成 (count=4)
+    F->>F: 生成 tempId
+    F->>F: 创建 pendingTask
+    F->>B: POST /generate (SSE)
+    B-->>F: SSE: start {batch_id, count}
+    F->>F: 关联 tempId -> batchId
+    F->>F: 显示 4 个 loading 占位符
+    
+    par 并发生成
+        B->>G: 请求图片 1
+        B->>G: 请求图片 2
+        B->>G: 请求图片 3
+        B->>G: 请求图片 4
+    end
+    
+    G-->>B: 图片 2 完成
+    B-->>F: SSE: image {index:1, url}
+    F->>F: 更新位置 1 为图片
+    
+    G-->>B: 图片 1 完成
+    B-->>F: SSE: image {index:0, url}
+    F->>F: 更新位置 0 为图片
+    
+    G-->>B: 图片 4 完成
+    B-->>F: SSE: image {index:3, url}
+    F->>F: 更新位置 3 为图片
+    
+    G-->>B: 图片 3 完成
+    B-->>F: SSE: image {index:2, url}
+    F->>F: 更新位置 2 为图片
+    
+    B-->>F: SSE: complete {status, images}
+    F->>F: 通过 tempId 清除 pendingTask
+    F->>F: 刷新历史记录
+```
+
+### tempId 关联机制
+
+解决并发请求的竞态条件：
+
+```mermaid
+flowchart LR
+    A[用户点击发送] --> B[handleGenerateStart]
+    B --> C[生成 tempId]
+    C --> D[创建 pendingTask]
+    D --> E[返回 tempId 给 PromptBar]
+    E --> F[发送请求携带 tempId]
+    F --> G{响应类型}
+    G -->|SSE| H[onSSEStart 关联 batchId]
+    G -->|异步| I[onTaskCreated 关联 taskId]
+    G -->|同步| J[onGenerate 清除]
+    H --> K[onSSEComplete 通过 tempId 清除]
+    I --> L[轮询完成后通过 tempId 清除]
+```
+
 ## 安全设计
 
 ### 本地通信

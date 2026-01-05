@@ -9,17 +9,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"sigma/config"
 	"sigma/models"
 	"sigma/types"
 	"sigma/utils"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // ImageResult 单张图片生成结果
@@ -52,7 +54,7 @@ func GenerateHandler(c *gin.Context) {
 	if imageSize == "" {
 		imageSize = "2K"
 	}
-	
+
 	// 获取生成类型，默认为创作空间
 	generationType := c.PostForm("type")
 	if generationType == "" {
@@ -139,18 +141,194 @@ func generateSingleImage(c *gin.Context, currentToken, prompt, aspectRatio, imag
 	for i, ref := range savedRefImages {
 		absoluteRefImages[i] = utils.ToAbsoluteURL(ref, config.ServerPort)
 	}
-	
+
 	// 立即返回 task_id，让前端可以开始轮询
 	c.JSON(200, gin.H{
 		"status":     "processing",
 		"task_id":    taskID,
 		"ref_images": absoluteRefImages,
 	})
-	
+
 	// 在后台 goroutine 中处理 AI 请求
 	go func() {
 		processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generationType, parts, refImagesJSON, taskID, task)
 	}()
+}
+
+// isQuotaError 检查错误消息是否是余额不足错误
+func isQuotaError(errorMessage string) bool {
+	quotaKeywords := []string{
+		"额度已用尽",
+		"余额不足",
+		"quota",
+		"insufficient",
+		"RemainQuota",
+		"balance",
+	}
+	lowerMsg := strings.ToLower(errorMessage)
+	for _, keyword := range quotaKeywords {
+		if strings.Contains(lowerMsg, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractImageURLFromMarkdown 从 markdown 文本中提取图片 URL
+// 支持格式: ![image](https://...) 或 ![任意文字](https://...)
+func extractImageURLFromMarkdown(text string) string {
+	// 匹配 markdown 图片格式: ![...](URL)
+	// 正则: !\[.*?\]\((https?://[^\s\)]+)\)
+	re := regexp.MustCompile(`!\[.*?\]\((https?://[^\s\)]+)\)`)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
+
+// downloadAndSaveImage 下载图片并保存到本地
+func downloadAndSaveImage(imageURL string) (string, error) {
+	utils.LogAPI("开始下载图片: %s", imageURL)
+
+	// 创建 HTTP 客户端
+	client := &http.Client{Timeout: 60 * time.Second}
+
+	resp, err := client.Get(imageURL)
+	if err != nil {
+		return "", fmt.Errorf("下载图片失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("下载图片失败，状态码: %d", resp.StatusCode)
+	}
+
+	// 读取图片数据
+	imgData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取图片数据失败: %w", err)
+	}
+
+	// 确定文件扩展名
+	ext := ".jpg"
+	contentType := resp.Header.Get("Content-Type")
+	if strings.Contains(contentType, "png") {
+		ext = ".png"
+	} else if strings.Contains(contentType, "webp") {
+		ext = ".webp"
+	} else if strings.Contains(contentType, "gif") {
+		ext = ".gif"
+	}
+
+	// 保存到本地
+	fileName := fmt.Sprintf("gen_%d%s", time.Now().UnixNano(), ext)
+	savePath := filepath.Join(config.OutputDir, fileName)
+	if err := os.WriteFile(savePath, imgData, 0644); err != nil {
+		return "", fmt.Errorf("保存图片失败: %w", err)
+	}
+
+	relativeImageURL := fmt.Sprintf("images/%s", fileName)
+	utils.LogAPI("图片下载成功: %s -> %s", imageURL, relativeImageURL)
+	return relativeImageURL, nil
+}
+
+// AICallResult API 调用结果
+type AICallResult struct {
+	Success      bool
+	ImageURL     string
+	ErrorMessage string
+	StatusCode   int
+	IsQuotaError bool
+}
+
+// callAIAPI 执行单次 AI API 调用
+func callAIAPI(apiURL, currentToken string, payloadBytes []byte, taskID string) AICallResult {
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return AICallResult{Success: false, ErrorMessage: err.Error()}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+currentToken)
+
+	client := &http.Client{Timeout: 840 * time.Second}
+	requestStartTime := time.Now()
+	utils.LogAPI("开始 AI API 请求 (任务 %s, URL: %s)...", taskID, apiURL)
+
+	resp, err := client.Do(req)
+	requestDuration := time.Since(requestStartTime)
+
+	if err != nil {
+		utils.LogAPIResponse(0, requestDuration, nil, err)
+		return AICallResult{Success: false, ErrorMessage: err.Error()}
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var respMap map[string]interface{}
+	if err := json.Unmarshal(respBody, &respMap); err == nil {
+		utils.LogAPIResponse(resp.StatusCode, requestDuration, respMap, nil)
+		utils.LogJSON("Generate Response", respMap)
+		utils.LogResponseStructureWithStatus("Response Structure", respMap, resp.StatusCode)
+	} else {
+		utils.LogAPI("响应解析失败，原始响应: Status=%d, Body=%s", resp.StatusCode, string(respBody))
+	}
+
+	if resp.StatusCode != 200 {
+		var apiError struct {
+			Error struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
+		}
+		errorMessage := fmt.Sprintf("API 请求失败，状态码: %d", resp.StatusCode)
+		if err := json.Unmarshal(respBody, &apiError); err == nil && apiError.Error.Message != "" {
+			errorMessage = apiError.Error.Message
+		}
+		return AICallResult{
+			Success:      false,
+			ErrorMessage: errorMessage,
+			StatusCode:   resp.StatusCode,
+			IsQuotaError: isQuotaError(errorMessage),
+		}
+	}
+
+	var aiResp types.AIResponse
+	json.Unmarshal(respBody, &aiResp)
+
+	if len(aiResp.Candidates) == 0 {
+		return AICallResult{Success: false, ErrorMessage: "模型未返回内容"}
+	}
+
+	// 提取图片
+	for _, part := range aiResp.Candidates[0].Content.Parts {
+		// 优先处理 inlineData 格式（base64 图片）
+		if part.InlineData != nil {
+			imgData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
+			if err == nil {
+				fileName := fmt.Sprintf("gen_%d.png", time.Now().UnixNano())
+				savePath := filepath.Join(config.OutputDir, fileName)
+				os.WriteFile(savePath, imgData, 0644)
+				relativeImageURL := fmt.Sprintf("images/%s", fileName)
+				return AICallResult{Success: true, ImageURL: relativeImageURL}
+			}
+		}
+
+		// 处理 text 字段中的 markdown 图片 URL（如 ![image](https://...)）
+		if part.Text != "" {
+			imageURL := extractImageURLFromMarkdown(part.Text)
+			if imageURL != "" {
+				// 下载图片并保存到本地
+				localURL, err := downloadAndSaveImage(imageURL)
+				if err == nil {
+					return AICallResult{Success: true, ImageURL: localURL}
+				}
+				utils.LogAPI("下载图片失败: %s, 错误: %v", imageURL, err)
+			}
+		}
+	}
+
+	return AICallResult{Success: false, ErrorMessage: "图片生成失败，请重试"}
 }
 
 // processAIGeneration 在后台处理 AI 生成请求
@@ -164,13 +342,13 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 			config.DB.Save(task)
 		}
 	}()
-	
-	// 构建 ImageConfig（开发和生产环境都使用 gemini-3-pro-image-preview，支持 imageSize）
+
+	// 构建 ImageConfig
 	imageConfig := &types.ImageConfig{
 		AspectRatio: aspectRatio,
 		ImageSize:   imageSize,
 	}
-	
+
 	payloadObj := types.AIRequest{
 		Contents: []types.Content{{Role: "user", Parts: parts}},
 		GenerationConfig: types.GenerationConfig{
@@ -179,171 +357,81 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 		},
 	}
 
-	// 记录 API 请求（始终记录到 api.log）
-	utils.LogAPIRequest("POST", config.GetAIServiceURL(), payloadObj)
+	payloadBytes, _ := json.Marshal(payloadObj)
+
+	// 获取 API URL
+	apiURL := config.GetCurrentAIServiceURL()
+
+	utils.LogAPIRequest("POST", apiURL, payloadObj)
 	utils.LogJSON("Generate Request", payloadObj)
 
-	payloadBytes, _ := json.Marshal(payloadObj)
-	req, err := http.NewRequest("POST", config.GetAIServiceURL(), bytes.NewBuffer(payloadBytes))
-	if err != nil {
-		errMsg := fmt.Sprintf("创建请求失败: %s", err.Error())
-		utils.LogAPI("任务 %s 创建请求失败: %s", taskID, err.Error())
-		task.FailTask(errMsg)
-		config.DB.Save(task)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+currentToken)
+	// 调用 API
+	result := callAIAPI(apiURL, currentToken, payloadBytes, taskID)
 
-	// 设置超时时间为 840 秒（14分钟）
-	client := &http.Client{Timeout: 840 * time.Second}
-	
-	// 记录请求开始时间
-	requestStartTime := time.Now()
-	utils.LogAPI("开始 AI API 请求 (任务 %s)...", taskID)
-	
-	resp, err := client.Do(req)
-	
-	// 计算请求耗时
-	requestDuration := time.Since(requestStartTime)
-	
-	if err != nil {
-		// 记录错误响应
-		utils.LogAPIResponse(0, requestDuration, nil, err)
-		// 更新任务状态为失败
-		task.FailTask(err.Error())
-		config.DB.Save(task)
-		utils.LogAPI("任务 %s 失败: %s", taskID, err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	// 处理最终结果
+	if result.Success {
+		finalImageURL := fmt.Sprintf("%s/%s", utils.GetBaseURL(config.ServerPort), result.ImageURL)
 
-	var respMap map[string]interface{}
-	if err := json.Unmarshal(respBody, &respMap); err == nil {
-		// 记录 API 响应（始终记录到 api.log）
-		utils.LogAPIResponse(resp.StatusCode, requestDuration, respMap, nil)
-		// 先打印结构（不含 base64 数据）
-		utils.LogJSON("Generate Response", respMap)
-		// 打印原始结构的 key 路径，帮助调试（包含状态码）
-		utils.LogResponseStructureWithStatus("Response Structure", respMap, resp.StatusCode)
+		// 保存历史记录
+		newRecord := models.GenerationHistory{
+			Prompt:    prompt,
+			ImageURL:  result.ImageURL,
+			FileName:  extractFileName(result.ImageURL),
+			RefImages: string(refImagesJSON),
+			Type:      generationType,
+		}
+		config.DB.Create(&newRecord)
+
+		// 增加生成计数
+		var stats models.GenerationStats
+		dbResult := config.DB.First(&stats)
+		if dbResult.Error != nil {
+			stats = models.GenerationStats{TotalCount: 1}
+			config.DB.Create(&stats)
+		} else {
+			stats.TotalCount++
+			config.DB.Save(&stats)
+		}
+
+		// 更新任务状态为完成
+		task.CompleteTask(finalImageURL)
+		config.DB.Save(task)
+		utils.LogAPI("任务 %s 完成: %s", taskID, finalImageURL)
 	} else {
-		utils.LogAPI("响应解析失败，原始响应: Status=%d, Body=%s", resp.StatusCode, string(respBody))
-		fmt.Printf("\n====== [Generate Response Raw] ======\nStatus Code: %d\n%s\n=====================================\n", resp.StatusCode, string(respBody))
-	}
-
-	// 首先检查是否是 API 错误响应（非 200 状态码）
-	if resp.StatusCode != 200 {
-		var apiError struct {
-			Error struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-			} `json:"error"`
-		}
-		errorMessage := fmt.Sprintf("API 请求失败，状态码: %d", resp.StatusCode)
-		if err := json.Unmarshal(respBody, &apiError); err == nil && apiError.Error.Message != "" {
-			errorMessage = apiError.Error.Message
-		}
 		// 过滤敏感信息
-		filteredMessage := config.FilterSensitiveInfo(errorMessage)
-		// API 返回了错误，更新任务状态为失败
+		filteredMessage := config.FilterSensitiveInfo(result.ErrorMessage)
 		task.FailTask(filteredMessage)
 		config.DB.Save(task)
 		utils.LogAPI("任务 %s 失败: %s", taskID, filteredMessage)
-		return
-	}
 
-	var aiResp types.AIResponse
-	json.Unmarshal(respBody, &aiResp)
-
-	if len(aiResp.Candidates) == 0 {
-		// 更新任务状态为失败
-		task.FailTask("模型未返回内容")
-		config.DB.Save(task)
-		utils.LogAPI("任务 %s 失败: 模型未返回内容", taskID)
-		return
-	}
-
-	var finalImageURL string
-
-	// 只取第一张图片（AI 有时会返回多张图片，我们只需要第一张）
-	for _, part := range aiResp.Candidates[0].Content.Parts {
-		// 只处理第一张图片
-		if part.InlineData != nil && finalImageURL == "" {
-			imgData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
-			if err == nil {
-				fileName := fmt.Sprintf("gen_%d.png", time.Now().UnixNano())
-				savePath := filepath.Join(config.OutputDir, fileName)
-				os.WriteFile(savePath, imgData, 0644)
-
-				// 存储相对路径，读取时动态拼接当前端口
-				relativeImageURL := fmt.Sprintf("images/%s", fileName)
-				finalImageURL = fmt.Sprintf("%s/%s", utils.GetBaseURL(config.ServerPort), relativeImageURL)
-
-				newRecord := models.GenerationHistory{
-					Prompt:    prompt,
-					ImageURL:  relativeImageURL, // 存储相对路径
-					FileName:  fileName,
-					RefImages: string(refImagesJSON),
-					Type:      generationType,
-				}
-				config.DB.Create(&newRecord)
-				
-				// 增加生成计数
-				var stats models.GenerationStats
-				result := config.DB.First(&stats)
-				if result.Error != nil {
-					stats = models.GenerationStats{TotalCount: 1}
-					config.DB.Create(&stats)
-				} else {
-					stats.TotalCount++
-					config.DB.Save(&stats)
-				}
-			}
-		}
-	}
-
-	if finalImageURL == "" {
-		// 更新任务状态为失败
-		errorMsg := "图片生成失败，请重试"
-		task.FailTask(errorMsg)
-		config.DB.Save(task)
-		utils.LogAPI("任务 %s 失败: %s", taskID, errorMsg)
-		
-		// 保存失败记录到历史（用于刷新后显示）
+		// 保存失败记录到历史
 		failedRecord := models.GenerationHistory{
 			Prompt:    prompt,
 			RefImages: string(refImagesJSON),
 			Type:      generationType,
-			ErrorMsg:  errorMsg,
+			ErrorMsg:  filteredMessage,
 		}
 		config.DB.Create(&failedRecord)
-		return
 	}
-
-	// 更新任务状态为完成
-	task.CompleteTask(finalImageURL)
-	config.DB.Save(task)
-	utils.LogAPI("任务 %s 完成: %s", taskID, finalImageURL)
 }
 
 // generateMultipleImages 生成多张图片（count > 1）- 使用 SSE 流式返回
 func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, savedRefImages []string, refImagesJSON []byte, taskID string, task *models.GenerationTask, count int) {
 	// 生成批次 ID
 	batchID := uuid.New().String()
-	
+
 	// 转换相对路径为完整 URL 返回给前端
 	absoluteRefImages := make([]string, len(savedRefImages))
 	for i, ref := range savedRefImages {
 		absoluteRefImages[i] = utils.ToAbsoluteURL(ref, config.ServerPort)
 	}
-	
+
 	// 设置 SSE 响应头
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
-	
+
 	// 发送初始事件，告知前端批次信息
 	initialData := gin.H{
 		"type":       "start",
@@ -356,33 +444,33 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 	initialJSON, _ := json.Marshal(initialData)
 	c.SSEvent("message", string(initialJSON))
 	c.Writer.Flush()
-	
+
 	// 用于存储所有图片的结果
 	results := make([]ImageResult, count)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	
+
 	// 成功计数
 	successCount := 0
 	completedCount := 0
-	
+
 	// 结果通道，用于流式返回
 	resultChan := make(chan ImageResult, count)
-	
+
 	// 8.3: 并发调用 AI API
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			
+
 			result := callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize, parts, index)
-			
+
 			mu.Lock()
 			results[index] = result
-			
+
 			if result.Error == "" && result.ImageURL != "" {
 				successCount++
-				
+
 				// 8.5: 存储历史记录，共享 batch_id
 				batchIndex := index
 				batchTotal := count
@@ -397,7 +485,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 					BatchTotal: &batchTotal,
 				}
 				config.DB.Create(&newRecord)
-				
+
 				// 增加生成计数
 				var stats models.GenerationStats
 				dbResult := config.DB.First(&stats)
@@ -410,22 +498,22 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 				}
 			}
 			mu.Unlock()
-			
+
 			// 发送结果到通道
 			resultChan <- result
 		}(i)
 	}
-	
+
 	// 在另一个 goroutine 中等待所有完成后关闭通道
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
-	
+
 	// 流式返回每个完成的图片
 	for result := range resultChan {
 		completedCount++
-		
+
 		var eventData gin.H
 		if result.Error != "" {
 			eventData = gin.H{
@@ -446,15 +534,15 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 				"total":     count,
 			}
 		}
-		
+
 		eventJSON, _ := json.Marshal(eventData)
 		c.SSEvent("message", string(eventJSON))
 		c.Writer.Flush()
 	}
-	
+
 	// 等待所有并发请求完成（实际上已经完成了，因为通道已关闭）
 	wg.Wait()
-	
+
 	// 构建最终结果
 	images := make([]gin.H, count)
 	for i, result := range results {
@@ -472,7 +560,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 			}
 		}
 	}
-	
+
 	// 更新任务状态
 	status := "success"
 	if successCount == 0 {
@@ -496,7 +584,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 		task.CompleteTask(results[0].ImageURL)
 	}
 	config.DB.Save(task)
-	
+
 	// 发送完成事件
 	completeData := gin.H{
 		"type":          "complete",
@@ -521,13 +609,13 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 			utils.LogAPI("图片 %d 生成发生 panic: %v", index+1, r)
 		}
 	}()
-	
-	// 构建 ImageConfig（开发和生产环境都使用 gemini-3-pro-image-preview，支持 imageSize）
+
+	// 构建 ImageConfig
 	imageConfig := &types.ImageConfig{
 		AspectRatio: aspectRatio,
 		ImageSize:   imageSize,
 	}
-	
+
 	payloadObj := types.AIRequest{
 		Contents: []types.Content{{Role: "user", Parts: parts}},
 		GenerationConfig: types.GenerationConfig{
@@ -536,11 +624,22 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 		},
 	}
 
-	// 记录 API 请求（始终记录到 api.log）
-	utils.LogAPIRequest("POST", config.GetAIServiceURL(), payloadObj)
-
 	payloadBytes, _ := json.Marshal(payloadObj)
-	req, err := http.NewRequest("POST", config.GetAIServiceURL(), bytes.NewBuffer(payloadBytes))
+
+	// 获取 API URL
+	apiURL := config.GetCurrentAIServiceURL()
+
+	utils.LogAPIRequest("POST", apiURL, payloadObj)
+
+	// 调用 API
+	result := callAIAPIInternal(apiURL, currentToken, payloadBytes, index)
+
+	return result
+}
+
+// callAIAPIInternal 内部 API 调用函数
+func callAIAPIInternal(apiURL, currentToken string, payloadBytes []byte, index int) ImageResult {
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		utils.LogAPI("图片 %d 创建请求失败: %s", index+1, err.Error())
 		return ImageResult{Error: err.Error(), Index: index}
@@ -548,28 +647,27 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
 
-	// 设置超时时间为 840 秒（14分钟）
 	client := &http.Client{Timeout: 840 * time.Second}
-	
-	utils.LogAPI("开始 AI API 请求 (图片 %d)...", index+1)
+
+	utils.LogAPI("开始 AI API 请求 (图片 %d, URL: %s)...", index+1, apiURL)
 	requestStartTime := time.Now()
-	
+
 	resp, err := client.Do(req)
 	requestDuration := time.Since(requestStartTime)
-	
+
 	if err != nil {
 		utils.LogAPIResponse(0, requestDuration, nil, err)
 		utils.LogAPI("图片 %d 请求失败: %s (耗时: %v)", index+1, err.Error(), requestDuration)
 		return ImageResult{Error: err.Error(), Index: index}
 	}
 	defer resp.Body.Close()
-	
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		utils.LogAPI("图片 %d 读取响应失败: %s", index+1, err.Error())
 		return ImageResult{Error: "读取响应失败: " + err.Error(), Index: index}
 	}
-	
+
 	// 记录响应
 	var respMap map[string]interface{}
 	if err := json.Unmarshal(respBody, &respMap); err == nil {
@@ -577,7 +675,7 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 	} else {
 		utils.LogAPI("图片 %d 响应解析失败: %s", index+1, err.Error())
 	}
-	
+
 	// 检查 API 错误
 	if resp.StatusCode != 200 {
 		var apiError struct {
@@ -591,22 +689,23 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 		}
 		filteredMessage := config.FilterSensitiveInfo(errorMessage)
 		utils.LogAPI("图片 %d API 错误: %s", index+1, filteredMessage)
-		return ImageResult{Error: filteredMessage, Index: index}
+		return ImageResult{Error: errorMessage, Index: index} // 返回原始错误用于判断是否是余额错误
 	}
-	
+
 	var aiResp types.AIResponse
 	if err := json.Unmarshal(respBody, &aiResp); err != nil {
 		utils.LogAPI("图片 %d 解析 AI 响应失败: %s", index+1, err.Error())
 		return ImageResult{Error: "解析响应失败", Index: index}
 	}
-	
+
 	if len(aiResp.Candidates) == 0 {
 		utils.LogAPI("图片 %d 模型未返回内容", index+1)
 		return ImageResult{Error: "模型未返回内容", Index: index}
 	}
-	
+
 	// 提取图片
 	for _, part := range aiResp.Candidates[0].Content.Parts {
+		// 优先处理 inlineData 格式（base64 图片）
 		if part.InlineData != nil {
 			imgData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 			if err == nil {
@@ -616,8 +715,7 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 					utils.LogAPI("图片 %d 保存失败: %s", index+1, err.Error())
 					return ImageResult{Error: "保存图片失败", Index: index}
 				}
-				
-				// 存储相对路径，读取时动态拼接当前端口
+
 				relativeImageURL := fmt.Sprintf("images/%s", fileName)
 				utils.LogAPI("图片 %d 生成成功: %s (耗时: %v)", index+1, relativeImageURL, requestDuration)
 				return ImageResult{ImageURL: relativeImageURL, Index: index}
@@ -625,8 +723,22 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 				utils.LogAPI("图片 %d 解码 base64 失败: %s", index+1, err.Error())
 			}
 		}
+
+		// 处理 text 字段中的 markdown 图片 URL（如 ![image](https://...)）
+		if part.Text != "" {
+			imageURL := extractImageURLFromMarkdown(part.Text)
+			if imageURL != "" {
+				// 下载图片并保存到本地
+				localURL, err := downloadAndSaveImage(imageURL)
+				if err == nil {
+					utils.LogAPI("图片 %d 生成成功（URL模式）: %s (耗时: %v)", index+1, localURL, requestDuration)
+					return ImageResult{ImageURL: localURL, Index: index}
+				}
+				utils.LogAPI("图片 %d 下载失败: %s, 错误: %v", index+1, imageURL, err)
+			}
+		}
 	}
-	
+
 	utils.LogAPI("图片 %d 未找到图片数据", index+1)
 	return ImageResult{Error: "图片生成失败", Index: index}
 }
@@ -639,4 +751,3 @@ func extractFileName(url string) string {
 	}
 	return ""
 }
-

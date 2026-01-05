@@ -322,9 +322,21 @@ export const api = {
   },
 
   // 设置 API Key
-  async setApiKey(key: string): Promise<Response> {
+  async setApiKey(key: string, skipValidate: boolean = false): Promise<Response> {
     const baseUrl = await getCachedApiUrl();
     return fetch(`${baseUrl}/config/apikey`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ api_key: key, skip_validate: skipValidate }),
+    });
+  },
+
+  // 验证 API Key 是否有效
+  async validateApiKey(key: string): Promise<Response> {
+    const baseUrl = await getCachedApiUrl();
+    return fetch(`${baseUrl}/config/apikey/validate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -443,30 +455,6 @@ export const api = {
     return fetch(`${baseUrl}/tasks/${encodeURIComponent(taskId)}`, {
       method: 'GET',
     });
-  },
-
-  // 查询余额状态
-  // Requirements: 4.1 - 调用 API 查询账户余额
-  async checkBalance(): Promise<{ lowBalance: boolean }> {
-    try {
-      const baseUrl = await getCachedApiUrl();
-      const response = await fetch(`${baseUrl}/api/balance`, {
-        method: 'GET',
-      });
-      
-      if (!response.ok) {
-        // 查询失败，静默处理，返回非低余额状态
-        console.warn('[API] 余额查询失败:', response.status);
-        return { lowBalance: false };
-      }
-      
-      const data = await response.json();
-      return { lowBalance: data.lowBalance || false };
-    } catch (error) {
-      // 查询失败，静默处理，返回非低余额状态
-      console.warn('[API] 余额查询异常:', error);
-      return { lowBalance: false };
-    }
   },
 
   // 多图生成 - SSE 流式接口
