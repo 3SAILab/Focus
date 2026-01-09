@@ -7,7 +7,13 @@ const versionChecker = require('./versionChecker');
 // ============ 开发环境日志开关 ============
 // 设置为 true 启用开发环境日志（控制台 + 文件）
 // 设置为 false 禁用所有日志
-const ENABLE_DEV_LOG = true;
+const ENABLE_DEV_LOG = false;
+// =========================================
+
+// ============ 生产环境日志开关 ============
+// 设置为 true 启用生产环境日志（用于调试用户问题）
+// 设置为 false 禁用生产环境日志（正常发布时应设为 false）
+const ENABLE_PROD_LOG = false;
 // =========================================
 
 // 创建中文菜单（传入 isDev 参数控制开发者工具显示）
@@ -149,9 +155,14 @@ const originalLog = console.log;
 const originalError = console.error;
 const originalWarn = console.warn;
 
-// 计算是否启用日志：开发环境 + 日志开关开启
+// 计算是否启用日志：
+// 1. 开发环境 + ENABLE_DEV_LOG = true
+// 2. 生产环境 + ENABLE_PROD_LOG = true
 function shouldEnableLog() {
-  return isDev && ENABLE_DEV_LOG;
+  if (isDev) {
+    return ENABLE_DEV_LOG;
+  }
+  return ENABLE_PROD_LOG;
 }
 
 // Initialize logging function (will be called after app.whenReady())
@@ -323,8 +334,8 @@ async function startBackend() {
       DB_PATH: path.join(directories.db, 'history.db'),
       PORT: DEFAULT_BACKEND_PORT.toString(),
       LOG_DIR: directories.logs,
-      // 仅开发环境且日志开关开启时启用 API 日志记录
-      ENABLE_API_LOG: (isDev && ENABLE_DEV_LOG) ? 'true' : 'false',
+      // 根据日志开关启用 API 日志记录
+      ENABLE_API_LOG: shouldEnableLog() ? 'true' : 'false',
       // 启用自动端口发现
       AUTO_PORT_DISCOVERY: 'true',
       // 生产环境标识（打包后的应用使用生产模型）
@@ -579,8 +590,8 @@ function checkBackendHealth(retryCount = 0) {
 function createWindow() {
   console.log('[Window] 创建主窗口...');
   
-  // 设置中文菜单（传入 isDev 控制开发者工具显示）
-  const menu = createChineseMenu(isDev);
+  // 设置中文菜单（传入 isDev 或 ENABLE_PROD_LOG 控制开发者工具显示）
+  const menu = createChineseMenu(isDev || ENABLE_PROD_LOG);
   Menu.setApplicationMenu(menu);
   console.log('[Window] ✓ 中文菜单已设置');
   
@@ -594,7 +605,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: false,  // 禁用 web 安全策略，解决跨域和本地文件加载问题
-      devTools: isDev,     // 仅开发环境启用开发者工具
+      devTools: isDev || ENABLE_PROD_LOG,     // 开发环境或启用生产日志时启用开发者工具
     },
   };
   
@@ -809,8 +820,8 @@ app.whenReady().then(async () => {
   // 数据迁移：从旧安装目录迁移到 AppData
   migrateOldData(userDataPath);
   
-  // Initialize logging (仅开发环境且日志开关开启时启用)
-  if (isDev && ENABLE_DEV_LOG) {
+  // Initialize logging (根据日志开关启用)
+  if (shouldEnableLog()) {
     const logsDir = path.join(userDataPath, 'logs');
     if (!fs.existsSync(logsDir)) {
       fs.mkdirSync(logsDir, { recursive: true });
@@ -825,7 +836,7 @@ app.whenReady().then(async () => {
   console.log('[App] Architecture:', process.arch);
   console.log('[App] Is packaged:', app.isPackaged);
   console.log('[App] Development mode:', isDev);
-  console.log('[App] Log enabled:', ENABLE_DEV_LOG);
+  console.log('[App] Log enabled:', shouldEnableLog(), isDev ? `(ENABLE_DEV_LOG=${ENABLE_DEV_LOG})` : `(ENABLE_PROD_LOG=${ENABLE_PROD_LOG})`);
   console.log('[App] User data directory:', userDataPath);
   console.log('[App] Install directory:', isDev ? 'N/A (dev mode)' : path.dirname(process.resourcesPath));
   console.log('[App] Log file path:', logPath || 'disabled');

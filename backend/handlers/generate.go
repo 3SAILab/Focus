@@ -328,7 +328,7 @@ func callAIAPI(apiURL, currentToken string, payloadBytes []byte, taskID string) 
 		}
 	}
 
-	return AICallResult{Success: false, ErrorMessage: "图片生成失败，请重试"}
+	return AICallResult{Success: false, ErrorMessage: "请求成功但未返回图片，请修改提示词后重试"}
 }
 
 // processAIGeneration 在后台处理 AI 生成请求
@@ -404,14 +404,8 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 		config.DB.Save(task)
 		utils.LogAPI("任务 %s 失败: %s", taskID, filteredMessage)
 
-		// 保存失败记录到历史
-		failedRecord := models.GenerationHistory{
-			Prompt:    prompt,
-			RefImages: string(refImagesJSON),
-			Type:      generationType,
-			ErrorMsg:  filteredMessage,
-		}
-		config.DB.Create(&failedRecord)
+		// 注意：失败的记录不保存到历史记录中
+		// 只有成功生成的图片才会出现在历史记录和统计中
 	}
 }
 
@@ -536,6 +530,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 		}
 
 		eventJSON, _ := json.Marshal(eventData)
+		utils.LogAPI("发送 SSE image 事件: index=%d, completed=%d/%d, hasError=%v", result.Index, completedCount, count, result.Error != "")
 		c.SSEvent("message", string(eventJSON))
 		c.Writer.Flush()
 	}
@@ -597,6 +592,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 		"total_count":   count,
 	}
 	completeJSON, _ := json.Marshal(completeData)
+	utils.LogAPI("发送 SSE complete 事件: status=%s, success_count=%d, total_count=%d", status, successCount, count)
 	c.SSEvent("message", string(completeJSON))
 	c.Writer.Flush()
 }
@@ -740,7 +736,7 @@ func callAIAPIInternal(apiURL, currentToken string, payloadBytes []byte, index i
 	}
 
 	utils.LogAPI("图片 %d 未找到图片数据", index+1)
-	return ImageResult{Error: "图片生成失败", Index: index}
+	return ImageResult{Error: "请求成功但未返回图片，请修改提示词后重试", Index: index}
 }
 
 // extractFileName 从 URL 中提取文件名

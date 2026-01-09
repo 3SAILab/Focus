@@ -60,9 +60,11 @@ func parsePageParams(c *gin.Context) (int, int) {
 }
 
 // HistoryHandler 获取历史记录处理函数
+// 只返回成功生成的记录（有 image_url 的），不包含失败记录
 func HistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
-	query := config.DB.Model(&models.GenerationHistory{})
+	query := config.DB.Model(&models.GenerationHistory{}).
+		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
 
 	dateStr := c.Query("date")
 	if dateStr != "" {
@@ -97,10 +99,12 @@ func HistoryHandler(c *gin.Context) {
 }
 
 // WhiteBackgroundHistoryHandler 获取白底图历史记录
+// 只返回成功生成的记录
 func WhiteBackgroundHistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
 	query := config.DB.Model(&models.GenerationHistory{}).
-		Where("type = ?", models.GenerationTypeWhiteBackground)
+		Where("type = ?", models.GenerationTypeWhiteBackground).
+		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
 
 	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
@@ -119,10 +123,12 @@ func WhiteBackgroundHistoryHandler(c *gin.Context) {
 }
 
 // ClothingChangeHistoryHandler 获取换装历史记录
+// 只返回成功生成的记录
 func ClothingChangeHistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
 	query := config.DB.Model(&models.GenerationHistory{}).
-		Where("type = ?", models.GenerationTypeClothingChange)
+		Where("type = ?", models.GenerationTypeClothingChange).
+		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
 
 	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
@@ -141,10 +147,12 @@ func ClothingChangeHistoryHandler(c *gin.Context) {
 }
 
 // ProductSceneHistoryHandler 获取一键商品图历史记录
+// 只返回成功生成的记录
 func ProductSceneHistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
 	query := config.DB.Model(&models.GenerationHistory{}).
-		Where("type = ?", models.GenerationTypeProductScene)
+		Where("type = ?", models.GenerationTypeProductScene).
+		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
 
 	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
@@ -163,10 +171,12 @@ func ProductSceneHistoryHandler(c *gin.Context) {
 }
 
 // LightShadowHistoryHandler 获取光影融合历史记录
+// 只返回成功生成的记录
 func LightShadowHistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
 	query := config.DB.Model(&models.GenerationHistory{}).
-		Where("type = ?", models.GenerationTypeLightShadow)
+		Where("type = ?", models.GenerationTypeLightShadow).
+		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
 
 	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize

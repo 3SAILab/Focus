@@ -24,6 +24,8 @@ export interface UseSSEGenerationParams {
   removePendingTask?: (identifier: { tempId?: string; batchId?: string }) => void;
   /** 生成完成后的清理回调 */
   onGenerationComplete?: () => void;
+  /** 余额不足错误回调 */
+  onQuotaError?: () => void;
 }
 
 /**
@@ -41,6 +43,8 @@ export interface UseSSEGenerationResult {
   handleSSEComplete: (event: SSECompleteEvent, tempId?: string) => Promise<void>;
   /** 清除流式批次状态 */
   clearStreamingBatch: () => void;
+  /** SSE 错误处理（保留已成功的图片，标记未完成的为失败） */
+  handleSSEError: (errorMessage: string) => void;
 }
 
 /**
@@ -59,6 +63,7 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
     updatePendingTaskBatchId,
     removePendingTask,
     onGenerationComplete,
+    onQuotaError,
   } = params;
 
   // SSE 流式生成状态
@@ -131,23 +136,35 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
       }
     }
 
+    // 预先检查是否有余额不足错误（在 setState 之前）
+    let hasQuotaError = false;
+    const processedImages = event.images.map((img) => {
+      if (img.error) {
+        const { message, isQuotaError } = getErrorMessage(img.error);
+        if (isQuotaError) {
+          hasQuotaError = true;
+        }
+        return { url: img.image_url, error: message };
+      }
+      return { url: img.image_url };
+    });
+
     // 获取当前的 streamingBatch 用于创建最终批次
     // 使用函数式更新来获取最新状态并清除
     setStreamingBatch(currentStreamingBatch => {
       // 将流式批次移动到完成的批次列表
       if (currentStreamingBatch) {
-        // 使用最终的图片数据更新
+        // 根据后端返回的 status 确定批次状态
+        // status: 'success' | 'partial' | 'failed'
+        const batchStatus = event.status === 'failed' ? 'failed' : 'completed';
+        
         const finalBatch = createBatchResult({
           batchId: currentStreamingBatch.batchId,
           prompt: currentStreamingBatch.prompt,
           imageCount: event.images.length,
-          images: event.images.map((img) => ({
-            url: img.image_url,
-            // 如果有错误，使用 getErrorMessage 过滤敏感信息
-            error: img.error ? getErrorMessage(img.error).message : undefined,
-          })),
+          images: processedImages,
           refImages: event.ref_images || currentStreamingBatch.refImages || [],
-          status: 'completed',
+          status: batchStatus,
         });
         
         onBatchComplete(finalBatch);
@@ -160,9 +177,14 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
     // 调用生成完成回调
     onGenerationComplete?.();
 
+    // 如果有余额不足错误，触发回调
+    if (hasQuotaError && onQuotaError) {
+      onQuotaError();
+    }
+
     // 重新加载历史记录
     await loadHistory();
-  }, [onBatchComplete, loadHistory, removePendingTask, onGenerationComplete]);
+  }, [onBatchComplete, loadHistory, removePendingTask, onGenerationComplete, onQuotaError]);
 
   /**
    * 清除流式批次状态
@@ -172,11 +194,56 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
     setStreamingBatch(null);
   }, []);
 
+  /**
+   * SSE 错误处理
+   * 保留已成功的图片，把还在 loading 的图片标记为失败
+   */
+  const handleSSEError = useCallback((errorMessage: string) => {
+    console.log('[useSSEGeneration] SSE Error:', errorMessage);
+    
+    setStreamingBatch(currentStreamingBatch => {
+      if (currentStreamingBatch) {
+        // 处理图片：保留已成功的，把 loading 的标记为失败
+        const processedImages = currentStreamingBatch.images.map((img) => {
+          if (img.isLoading) {
+            // 还在 loading 的图片标记为失败
+            return { ...img, isLoading: false, error: errorMessage };
+          }
+          return img;
+        });
+        
+        // 检查是否有成功的图片
+        const hasSuccess = processedImages.some(img => img.url && !img.error);
+        const allFailed = processedImages.every(img => img.error);
+        
+        const finalBatch: BatchResult = {
+          ...currentStreamingBatch,
+          images: processedImages,
+          status: allFailed ? 'failed' : 'completed',
+        };
+        
+        onBatchComplete(finalBatch);
+        
+        // 如果有成功的图片，重新加载历史记录
+        if (hasSuccess) {
+          loadHistory();
+        }
+      }
+      
+      // 清除流式批次状态
+      return null;
+    });
+    
+    // 调用生成完成回调
+    onGenerationComplete?.();
+  }, [onBatchComplete, loadHistory, onGenerationComplete]);
+
   return {
     streamingBatch,
     handleSSEStart,
     handleSSEImage,
     handleSSEComplete,
     clearStreamingBatch,
+    handleSSEError,
   };
 }

@@ -105,6 +105,17 @@ func main() {
 		log.Printf("✓ 已清理 %d 个超时任务", cleanedCount)
 	}
 
+	// 启动定时清理任务（每分钟检查一次超时任务）
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if count, err := handlers.CleanupStaleTasks(); err == nil && count > 0 {
+				log.Printf("定时清理: 已清理 %d 个超时任务", count)
+			}
+		}
+	}()
+
 	// 创建 Gin 路由
 	r := gin.Default()
 

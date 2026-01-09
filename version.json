@@ -2,7 +2,7 @@
   "versionCode": "202601051846",
   "versionName": "1.0.5",
   "updateContent": "1. 添加删除功能\n2. 优化了用户体验",
-  "windowsUrl": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-1.0.2.zip",
-  "macX64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-1.0.2-x64.zip",
-  "macArm64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-1.0.2-arm64.zip"
+  "windowsUrl": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus.zip",
+  "macX64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-x64.zip",
+  "macArm64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-x64.zip"
 }

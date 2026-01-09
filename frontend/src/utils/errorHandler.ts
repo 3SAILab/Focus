@@ -2,13 +2,15 @@
 
 /**
  * 统一错误消息
- * 只有两种错误提示：
+ * 三种错误提示：
  * 1. 服务器过载 - 可重试
  * 2. 余额不足 - 需要充值
+ * 3. 未返回图片 - 修改提示词
  */
 const ERROR_MESSAGES = {
   SERVER_OVERLOAD: '服务器过载请重试，多次失败请联系销售',
   QUOTA_EXHAUSTED: '余额不足请联系销售充值',
+  NO_IMAGE_RETURNED: '请求成功但未返回图片，请修改提示词后重试',
 };
 
 /**
@@ -18,7 +20,7 @@ export interface ParsedError {
   message: string;
   isQuotaError: boolean;
   statusCode?: number;
-  userAction: 'contact_sales' | 'retry';
+  userAction: 'contact_sales' | 'retry' | 'modify_prompt';
 }
 
 /**
@@ -53,6 +55,13 @@ const QUOTA_PATTERNS = [
 ];
 
 /**
+ * 检查是否是"未返回图片"错误
+ */
+export function isNoImageError(error: string): boolean {
+  return error.includes('请求成功但未返回图片') || error.includes('未找到图片数据');
+}
+
+/**
  * 检查是否是余额/配额不足错误
  */
 export function isQuotaExhaustedError(error: string): boolean {
@@ -73,9 +82,10 @@ export function isQuotaExhaustedError(error: string): boolean {
 
 /**
  * 解析 API 错误信息
- * 统一返回两种错误消息之一：
+ * 统一返回三种错误消息之一：
  * 1. 余额不足 - 需要充值
- * 2. 服务器过载 - 可重试
+ * 2. 未返回图片 - 修改提示词
+ * 3. 服务器过载 - 可重试
  */
 export function parseApiError(error: unknown, httpStatusCode?: number): ParsedError {
   let rawMessage = '';
@@ -114,6 +124,16 @@ export function parseApiError(error: unknown, httpStatusCode?: number): ParsedEr
       isQuotaError: true,
       statusCode,
       userAction: 'contact_sales',
+    };
+  }
+  
+  // 检查是否是"未返回图片"错误
+  if (isNoImageError(rawMessage)) {
+    return {
+      message: ERROR_MESSAGES.NO_IMAGE_RETURNED,
+      isQuotaError: false,
+      statusCode,
+      userAction: 'modify_prompt',
     };
   }
   

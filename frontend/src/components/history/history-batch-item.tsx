@@ -46,8 +46,16 @@ export function HistoryBatchItem({
   const batchItems = displayItem.items || [];
   const batchTotal = displayItem.batchTotal || batchItems[0]?.batch_total || batchItems.length;
 
+  // 判断批次是否已超时（超过 15 分钟认为缺失的图片已失败）
+  const BATCH_TIMEOUT_MS = 15 * 60 * 1000; // 15 分钟
+  const batchCreatedAt = typeof displayItem.timestamp === 'string' 
+    ? new Date(displayItem.timestamp).getTime() 
+    : displayItem.timestamp;
+  const isBatchTimeout = Date.now() - batchCreatedAt > BATCH_TIMEOUT_MS;
+
   // 构建完整的图片数组
-  // 已加载的图片显示正常，未加载的位置显示占位符（loading 状态）
+  // 已加载的图片显示正常
+  // 未加载的位置：如果批次已超时，显示为失败；否则显示为加载中
   const fullImages = displayItem.fullBatchItems 
     ? displayItem.fullBatchItems.map((item, idx) => {
         if (item) {
@@ -57,10 +65,19 @@ export function HistoryBatchItem({
             index: item.batch_index ?? idx,
           };
         } else {
-          return {
-            isLoading: true,
-            index: idx,
-          };
+          // 缺失的图片：根据是否超时决定显示状态
+          if (isBatchTimeout) {
+            return {
+              error: '生成失败',
+              isLoading: false,
+              index: idx,
+            };
+          } else {
+            return {
+              isLoading: true,
+              index: idx,
+            };
+          }
         }
       })
     : batchItems.map((item, idx) => ({

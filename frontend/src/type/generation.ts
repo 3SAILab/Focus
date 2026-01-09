@@ -155,12 +155,23 @@ export function createBatchResult(params: {
       break;
       
     case 'failed': {
-      const errorMessage = images?.[0]?.error || '生成失败';
-      resultImages = Array.from({ length: count }, (_, index) => ({
-        error: errorMessage,
-        isLoading: false,
-        index,
-      }));
+      // 如果有传入的 images，使用它们（保留各自的错误信息）
+      // 否则创建统一的错误信息
+      if (images && images.length > 0) {
+        resultImages = images.map((img, index) => ({
+          url: img.url,
+          error: img.error || '生成失败',
+          isLoading: false,
+          index,
+        }));
+      } else {
+        const errorMessage = '生成失败';
+        resultImages = Array.from({ length: count }, (_, index) => ({
+          error: errorMessage,
+          isLoading: false,
+          index,
+        }));
+      }
       break;
     }
       

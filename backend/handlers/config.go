@@ -50,6 +50,7 @@ type TokenValidationResult struct {
 	Name     string
 	Remain   float64
 	Used     float64
+	Group    string // 分组信息
 	Platform string // 内部使用，不暴露给前端
 }
 
@@ -199,6 +200,20 @@ func checkVectorEngine(apiKey string) TokenValidationResult {
 
 	info := dataList[0].(map[string]interface{})
 
+	// 获取分组信息
+	group := ""
+	if g, ok := info["group"].(string); ok {
+		group = g
+	}
+
+	// 根据分组确定单张成本
+	// 限时特价: 0.159/张
+	// 优质gemini（默认）: 0.265/张
+	costPerImage := 0.265
+	if group == "限时特价" {
+		costPerImage = 0.159
+	}
+
 	// VectorEngine 算法
 	remainQuota := 0.0
 	usedQuota := 0.0
@@ -209,8 +224,8 @@ func checkVectorEngine(apiKey string) TokenValidationResult {
 		usedQuota = v
 	}
 
-	remainSheets := math.Round(remainQuota / 1000000.0 / 0.265)
-	usedSheets := math.Round(usedQuota / 1000000.0 / 0.265)
+	remainSheets := math.Round(remainQuota / 1000000.0 / costPerImage)
+	usedSheets := math.Round(usedQuota / 1000000.0 / costPerImage)
 
 	name := "未命名"
 	if n, ok := info["name"].(string); ok && n != "" {
@@ -222,6 +237,7 @@ func checkVectorEngine(apiKey string) TokenValidationResult {
 		Name:     name,
 		Remain:   remainSheets,
 		Used:     usedSheets,
+		Group:    group,
 		Platform: "vectorengine",
 	}
 }

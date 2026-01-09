@@ -118,12 +118,43 @@ export default function Create() {
         setHistory(filteredData);
         setCurrentPage(1);
         setHasMore(data.length >= PAGE_SIZE);
-        setBatchResults([]);
+        // 只清空成功的批次，保留失败的批次（失败的不会保存到历史记录）
+        setBatchResults(prev => prev.filter(batch => batch.status === 'failed'));
       }
     } catch (error) {
       console.error('加载历史记录失败:', error);
     }
   }, []);
+
+  // 检测不完整批次并自动刷新
+  // 当历史记录中有批次图片数量少于 batch_total 时，说明批次还在生成中
+  // 只对最近 15 分钟内的批次进行轮询，超时的批次不再轮询
+  useEffect(() => {
+    const BATCH_TIMEOUT_MS = 15 * 60 * 1000; // 15 分钟
+    const now = Date.now();
+    
+    // 检查是否有不完整且未超时的批次
+    const hasIncompleteBatch = history.some(item => {
+      if (!item.batch_id || !item.batch_total || item.batch_total <= 1) return false;
+      
+      // 检查批次是否已超时
+      const batchCreatedAt = new Date(item.created_at).getTime();
+      if (now - batchCreatedAt > BATCH_TIMEOUT_MS) return false; // 超时的批次不轮询
+      
+      // 统计该批次已有的图片数量
+      const batchCount = history.filter(h => h.batch_id === item.batch_id).length;
+      return batchCount < item.batch_total;
+    });
+
+    if (!hasIncompleteBatch) return;
+
+    // 有不完整且未超时的批次，启动轮询
+    const pollInterval = setInterval(() => {
+      loadHistory();
+    }, 3000); // 每 3 秒检查一次
+
+    return () => clearInterval(pollInterval);
+  }, [history, loadHistory]);
 
   // 加载更多历史记录
   const loadMoreHistory = useCallback(async () => {
@@ -178,7 +209,8 @@ export default function Create() {
     removePendingTask({ taskId: task.task_id });
     setIsGenerating(false);
     setCurrentTaskId(null);
-    setBatchResults([]);
+    // 只清空成功的批次，保留失败的批次
+    setBatchResults(prev => prev.filter(batch => batch.status === 'failed'));
     loadHistory();
     setCounterRefresh(prev => prev + 1);
   }, [loadHistory, removePendingTask]);
@@ -273,6 +305,7 @@ export default function Create() {
     handleSSEStart,
     handleSSEImage,
     handleSSEComplete,
+    handleSSEError,
   } = useSSEGeneration({
     onBatchComplete: (batch) => setBatchResults(prev => [...prev, batch]),
     loadHistory,
@@ -283,6 +316,7 @@ export default function Create() {
       setCounterRefresh(prev => prev + 1);
       setSelectedFiles([]);
     },
+    onQuotaError: () => setShowQuotaError(true),
   });
 
   // Use useDeleteConfirmation hook - Requirements: 7.1
@@ -454,28 +488,34 @@ export default function Create() {
       removePendingTask({ tempId });
     }
     
-    setIsGenerating(false);
-    setCurrentTaskId(null);
-    
     const { message, isQuotaError } = getErrorMessage(error);
     
-    if (count > 1) {
-      const failedBatch = createBatchResult({
-        batchId: 'failed-batch-' + Date.now(),
-        prompt: prompt || currentPrompt || '未知提示词',
-        imageCount: count,
-        images: [{ error: message }],
-        status: 'failed',
-      });
-      setBatchResults(prev => [...prev, failedBatch]);
+    // 如果是多图生成且有 streamingBatch，使用 handleSSEError 保留已成功的图片
+    if (count > 1 && streamingBatch) {
+      handleSSEError(message);
     } else {
-      const failedRecord: FailedGeneration = {
-        id: 'failed-' + Date.now(),
-        prompt: prompt || currentPrompt || '未知提示词',
-        errorMessage: message,
-        timestamp: Date.now(),
-      };
-      setFailedGenerations(prev => [...prev, failedRecord]);
+      // 单图或没有 streamingBatch 的情况
+      setIsGenerating(false);
+      setCurrentTaskId(null);
+      
+      if (count > 1) {
+        const failedBatch = createBatchResult({
+          batchId: 'failed-batch-' + Date.now(),
+          prompt: prompt || currentPrompt || '未知提示词',
+          imageCount: count,
+          images: [{ error: message }],
+          status: 'failed',
+        });
+        setBatchResults(prev => [...prev, failedBatch]);
+      } else {
+        const failedRecord: FailedGeneration = {
+          id: 'failed-' + Date.now(),
+          prompt: prompt || currentPrompt || '未知提示词',
+          errorMessage: message,
+          timestamp: Date.now(),
+        };
+        setFailedGenerations(prev => [...prev, failedRecord]);
+      }
     }
     
     if (isQuotaError) {
