@@ -133,7 +133,7 @@ function createChineseMenu(showDevTools = false) {
 
 let mainWindow = null;
 let backendProcess = null;
-const DEFAULT_BACKEND_PORT = 8080;
+const DEFAULT_BACKEND_PORT = 51888;  // 使用不常用的端口，避免与其他服务冲突
 const BACKEND_PROTOCOL = 'http';
 const MAX_PORT_ATTEMPTS = 10;
 const PORT_FILE_NAME = 'sigma-backend.port';

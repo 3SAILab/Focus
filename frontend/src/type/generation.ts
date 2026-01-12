@@ -155,9 +155,9 @@ export function createBatchResult(params: {
       break;
       
     case 'failed': {
-      // 如果有传入的 images，使用它们（保留各自的错误信息）
-      // 否则创建统一的错误信息
-      if (images && images.length > 0) {
+      // 如果有传入的 images 且数量与 count 匹配，使用它们
+      // 否则创建 count 个错误卡片
+      if (images && images.length === count) {
         resultImages = images.map((img, index) => ({
           url: img.url,
           error: img.error || '生成失败',
@@ -165,7 +165,10 @@ export function createBatchResult(params: {
           index,
         }));
       } else {
-        const errorMessage = '生成失败';
+        // 获取错误信息：优先使用传入的第一个错误，否则使用默认错误
+        const errorMessage = (images && images.length > 0 && images[0].error) 
+          ? images[0].error 
+          : '生成失败';
         resultImages = Array.from({ length: count }, (_, index) => ({
           error: errorMessage,
           isLoading: false,

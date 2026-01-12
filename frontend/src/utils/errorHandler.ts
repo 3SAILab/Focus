@@ -37,7 +37,11 @@ const QUOTA_KEYWORDS = [
   '余额',
   '耗尽',
   '不足',
+  '用尽',      // 新增：该令牌额度已用尽
+  '额度',      // 新增：该令牌额度已用尽
   'remainquota',
+  'invalid tokens',  // 新增：You have used invalid tokens
+  '无效令牌',   // 新增：您多次使用无效令牌
 ];
 
 /**

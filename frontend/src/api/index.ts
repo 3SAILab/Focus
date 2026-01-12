@@ -3,7 +3,7 @@
 // API 服务
 
 // 默认后端 URL（本地 HTTP）
-const DEFAULT_BACKEND_URL = 'http://localhost:8080';
+const DEFAULT_BACKEND_URL = 'http://localhost:51888';
 
 // ============ 测试模式开关 ============
 // 设置为 true 可以模拟 API 错误，用于测试 ErrorCard

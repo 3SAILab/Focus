@@ -482,23 +482,29 @@ export default function Create() {
 
   // 处理生成错误
   const handleGenerateError = (error: string, prompt?: string, imageCount?: number, tempId?: string) => {
+    console.log('[Create] handleGenerateError called:', { error, prompt, imageCount, tempId });
     const count = imageCount || selectedImageCount;
-    
-    if (tempId) {
-      removePendingTask({ tempId });
-    }
+    console.log('[Create] Resolved count:', count, 'selectedImageCount:', selectedImageCount);
     
     const { message, isQuotaError } = getErrorMessage(error);
+    console.log('[Create] Parsed error:', { message, isQuotaError });
     
     // 如果是多图生成且有 streamingBatch，使用 handleSSEError 保留已成功的图片
     if (count > 1 && streamingBatch) {
+      console.log('[Create] Using handleSSEError for multi-image with streamingBatch');
+      // 先移除 pendingTask
+      if (tempId) {
+        removePendingTask({ tempId });
+      }
       handleSSEError(message);
     } else {
       // 单图或没有 streamingBatch 的情况
+      console.log('[Create] Creating failed batch/record, streamingBatch:', !!streamingBatch);
       setIsGenerating(false);
       setCurrentTaskId(null);
       
       if (count > 1) {
+        // 多图生成失败：创建失败批次
         const failedBatch = createBatchResult({
           batchId: 'failed-batch-' + Date.now(),
           prompt: prompt || currentPrompt || '未知提示词',
@@ -506,18 +512,38 @@ export default function Create() {
           images: [{ error: message }],
           status: 'failed',
         });
-        setBatchResults(prev => [...prev, failedBatch]);
+        console.log('[Create] Created failedBatch:', failedBatch);
+        // 先添加失败批次，再移除 pendingTask，确保 UI 不会闪烁
+        setBatchResults(prev => {
+          console.log('[Create] Adding failedBatch to batchResults, prev length:', prev.length);
+          return [...prev, failedBatch];
+        });
+        // 移除 pendingTask 放在添加 failedBatch 之后
+        if (tempId) {
+          removePendingTask({ tempId });
+        }
       } else {
+        // 单图生成失败：创建失败记录
         const failedRecord: FailedGeneration = {
           id: 'failed-' + Date.now(),
           prompt: prompt || currentPrompt || '未知提示词',
           errorMessage: message,
           timestamp: Date.now(),
         };
-        setFailedGenerations(prev => [...prev, failedRecord]);
+        console.log('[Create] Created failedRecord:', failedRecord);
+        // 先添加失败记录，再移除 pendingTask
+        setFailedGenerations(prev => {
+          console.log('[Create] Adding failedRecord to failedGenerations, prev length:', prev.length);
+          return [...prev, failedRecord];
+        });
+        // 移除 pendingTask 放在添加 failedRecord 之后
+        if (tempId) {
+          removePendingTask({ tempId });
+        }
       }
     }
     
+    // 如果是额度不足错误，显示弹窗
     if (isQuotaError) {
       setShowQuotaError(true);
     }
