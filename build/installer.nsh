@@ -2,13 +2,24 @@
 ; This script ensures user data is preserved during updates
 
 !macro customInit
+  ; 强制关闭旧版本进程，避免更新后无法启动
+  ; 关闭 Focus 主程序
+  nsExec::ExecToLog 'taskkill /f /im Focus.exe'
+  ; 关闭后端服务
+  nsExec::ExecToLog 'taskkill /f /im sigma-backend.exe'
+  ; 等待进程完全退出
+  Sleep 1000
+  
   ; Check if this is an upgrade (data directory exists)
   IfFileExists "$INSTDIR\data\*.*" 0 +2
     SetShellVarContext current
 !macroend
 
 !macro preInit
-  ; Nothing special needed before init
+  ; 安装前再次确保进程已关闭
+  nsExec::ExecToLog 'taskkill /f /im Focus.exe'
+  nsExec::ExecToLog 'taskkill /f /im sigma-backend.exe'
+  Sleep 500
 !macroend
 
 !macro customInstall

@@ -25,7 +25,7 @@ type platformConfig struct {
 var vectorEngineConfig = platformConfig{
 	BaseURL: "https://api.vectorengine.ai",
 	User:    decodeHex("313432353338"),
-	Key:     decodeHex("5378704f347473773035676e356963454b7942623469534b66452f593354456a"),
+	Key:     decodeHex("30736f684368584a764a51394579444c5a3738637879334b796f41786956733d"),
 }
 
 // Aiaimi 平台配置
