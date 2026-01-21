@@ -170,6 +170,15 @@ export default function PromptBar({
 
   // 处理拖拽进入
   const handleDragOver = (e: React.DragEvent) => {
+    // 检查是否是内部图片排序拖拽
+    const isInternalDrag = e.dataTransfer.types.includes('text/plain') && 
+                          e.dataTransfer.effectAllowed === 'move';
+    
+    // 如果是内部拖拽，不显示上传提示
+    if (isInternalDrag) {
+      return;
+    }
+    
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
@@ -199,6 +208,15 @@ export default function PromptBar({
 
   // 处理拖拽释放
   const handleDrop = async (e: React.DragEvent) => {
+    // 检查是否是内部图片排序拖拽
+    const isInternalDrag = e.dataTransfer.types.includes('text/plain') && 
+                          e.dataTransfer.effectAllowed === 'move';
+    
+    // 如果是内部拖拽，不处理
+    if (isInternalDrag) {
+      return;
+    }
+    
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
@@ -312,9 +330,12 @@ export default function PromptBar({
             onSSEImage?.(event);
           },
           onComplete: (event) => {
-            console.log('[PromptBar] SSE Complete:', event);
+            console.log('[PromptBar] SSE Complete 收到:', event);
+            console.log('[PromptBar] tempId:', tempId);
+            console.log('[PromptBar] 调用 onSSEComplete');
             // 修复：传递 tempId 给父组件，用于精确清除
             onSSEComplete?.(event, tempId);
+            console.log('[PromptBar] onSSEComplete 调用完成');
           },
           onError: (error) => {
             console.error('[PromptBar] SSE Error:', error);
@@ -337,18 +358,32 @@ export default function PromptBar({
 
       const data = await response.json();
       
+      // 调试：打印后端返回的数据结构
+      console.log('[PromptBar] Backend response data:', {
+        hasImages: !!data.images,
+        hasImageUrl: !!data.image_url,
+        hasTaskId: !!data.task_id,
+        status: data.status,
+        tempId: tempId,
+        data: data
+      });
+      
       // 处理多图响应 (Requirements: 5.2)
       if (currentImageCount > 1 && data.images && onGenerateMulti) {
+        console.log('[PromptBar] 多图响应，调用 onGenerateMulti');
         // 修复：传递 tempId 给父组件
         onGenerateMulti(data as GenerateMultiResponse, tempId);
       } else if (data.image_url) {
+        console.log('[PromptBar] 单图同步响应，调用 onGenerate');
         // 单图响应格式 (向后兼容 - 同步模式)
         // 修复：传递 tempId 给父组件
         onGenerate(data as GenerateResponse, tempId);
       } else if (data.task_id) {
+        console.log('[PromptBar] 异步模式，task_id:', data.task_id, 'tempId:', tempId);
         // 异步模式：后端返回 task_id，前端需要轮询
         registerTask(data.task_id, GenerationType.CREATE as GenerationTypeValue);
         // 修复：传递 tempId 给父组件，用于精确关联
+        console.log('[PromptBar] 调用 onTaskCreated');
         onTaskCreated?.(data.task_id, tempId);
       } else {
         throw new Error('后端未返回图片地址');

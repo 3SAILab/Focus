@@ -7,13 +7,29 @@ const versionChecker = require('./versionChecker');
 // ============ 开发环境日志开关 ============
 // 设置为 true 启用开发环境日志（控制台 + 文件）
 // 设置为 false 禁用所有日志
-const ENABLE_DEV_LOG = false;
+const ENABLE_DEV_LOG = true;
 // =========================================
 
 // ============ 生产环境日志开关 ============
 // 设置为 true 启用生产环境日志（用于调试用户问题）
 // 设置为 false 禁用生产环境日志（正常发布时应设为 false）
-const ENABLE_PROD_LOG = false;
+const ENABLE_PROD_LOG = true;
+// =========================================
+
+// ============ 前端 Console 日志开关 ============
+// 设置为 true 保留前端 console.log（用于调试）
+// 设置为 false 在生产环境移除 console.log（减小包体积）
+// 
+// 配置方法：
+// 1. 修改 package.json 中的 build:frontend 脚本
+//    - 调试版本：set ENABLE_FRONTEND_CONSOLE=true
+//    - 正式版本：set ENABLE_FRONTEND_CONSOLE=false
+// 2. 或使用专用脚本：
+//    - npm run build:frontend (保留 console)
+//    - npm run build:frontend:release (移除 console)
+// 
+// 当前配置：保留 console（用于调试）
+const ENABLE_FRONTEND_CONSOLE = true;
 // =========================================
 
 // 创建中文菜单（传入 isDev 参数控制开发者工具显示）

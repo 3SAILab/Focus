@@ -117,7 +117,7 @@ export function Modal({
             {closable && (
               <button
                 onClick={onClose}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-white/50 transition-all"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-red-500 transition-all"
                 aria-label="Close modal"
                 data-testid="modal-close-button"
               >

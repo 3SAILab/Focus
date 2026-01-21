@@ -1,7 +1,7 @@
 {
   "name": "focus",
   "version": "1.0.5",
-  "versionCode": "202601120852",
+  "versionCode": "202601161321",
   "description": "Focus AI Image Generation Tool - Beta版",
   "main": "electron/main.js",
   "scripts": {
@@ -10,7 +10,8 @@
     "build": "npm run build:win-x64",
     "build:win-x64": "npm run build:frontend && npm run build:backend:win && npm run validate:build && npm run dist:win-x64",
     "build:sequential": "npm run build:frontend && npm run build:backend:win && npm run validate:build && npm run build:electron",
-    "build:frontend": "cd frontend && npm run build && cd ..",
+    "build:frontend": "cd frontend && set ENABLE_FRONTEND_CONSOLE=true&& npm run build && cd ..",
+    "build:frontend:release": "cd frontend && set ENABLE_FRONTEND_CONSOLE=false&& npm run build && cd ..",
     "build:backend:win": "cd backend && set GOARCH=amd64&& go build -trimpath -ldflags=\"-s -w -buildid=\" -o ../dist/backend/sigma-backend.exe . && cd ..",
     "build:backend:mac": "cd backend && GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags=\"-s -w -buildid=\" -o ../dist/backend/sigma-backend . && cd ..",
     "build:backend:mac-arm64": "cd backend && GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags=\"-s -w -buildid=\" -o ../dist/backend/sigma-backend . && cd ..",

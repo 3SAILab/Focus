@@ -85,6 +85,12 @@ func main() {
 	}
 	config.DB.AutoMigrate(&models.GenerationHistory{}, &models.GenerationStats{}, &models.GenerationTask{}, &config.AppConfig{})
 
+	// 自动迁移：恢复被软删除的记录
+	log.Println("检查数据库迁移...")
+	if err := autoMigrateDatabase(); err != nil {
+		log.Printf("警告: 数据库迁移失败: %v", err)
+	}
+
 	// 数据库初始化后，重新加载配置（从数据库加载）
 	if err := config.LoadPersistentConfig(); err != nil {
 		log.Printf("警告: 从数据库加载配置失败: %v", err)
@@ -229,4 +235,49 @@ func setupCleanupHandler() {
 		}
 		os.Exit(0)
 	}()
+}
+
+// autoMigrateDatabase 自动迁移数据库
+// 1. 添加 image_deleted 列（如果不存在）
+// 2. 恢复所有被软删除的记录
+func autoMigrateDatabase() error {
+	// 1. 检查 image_deleted 列是否存在
+	var columnExists bool
+	err := config.DB.Raw("SELECT COUNT(*) FROM pragma_table_info('generation_histories') WHERE name='image_deleted'").Scan(&columnExists)
+	if err != nil {
+		return fmt.Errorf("检查 image_deleted 列失败: %w", err)
+	}
+
+	// 2. 如果列不存在，添加它
+	if !columnExists {
+		log.Println("  添加 image_deleted 列...")
+		if err := config.DB.Exec("ALTER TABLE generation_histories ADD COLUMN image_deleted BOOLEAN DEFAULT 0").Error; err != nil {
+			return fmt.Errorf("添加 image_deleted 列失败: %w", err)
+		}
+		log.Println("  ✓ 已添加 image_deleted 列")
+	}
+
+	// 3. 检查是否有被软删除的记录
+	var deletedCount int64
+	config.DB.Raw("SELECT COUNT(*) FROM generation_histories WHERE deleted_at IS NOT NULL").Scan(&deletedCount)
+
+	if deletedCount > 0 {
+		log.Printf("  发现 %d 条被软删除的记录，正在恢复...", deletedCount)
+
+		// 4. 将被软删除的记录标记为 image_deleted = true
+		if err := config.DB.Exec("UPDATE generation_histories SET image_deleted = 1 WHERE deleted_at IS NOT NULL").Error; err != nil {
+			return fmt.Errorf("标记已删除记录失败: %w", err)
+		}
+
+		// 5. 恢复记录（将 deleted_at 设置为 NULL）
+		if err := config.DB.Exec("UPDATE generation_histories SET deleted_at = NULL WHERE deleted_at IS NOT NULL").Error; err != nil {
+			return fmt.Errorf("恢复记录失败: %w", err)
+		}
+
+		log.Printf("  ✓ 成功恢复 %d 条记录", deletedCount)
+	} else {
+		log.Println("  ✓ 数据库已是最新版本")
+	}
+
+	return nil
 }

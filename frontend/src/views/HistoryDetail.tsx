@@ -22,7 +22,7 @@ export default function HistoryDetail() {
 
   const loadHistory = async () => {
     try {
-      const response = await api.getHistory();
+      const response = await api.getHistory(1, 1000); // 增加到 1000 以显示所有历史记录
       if (response.ok) {
         const data = await response.json();
         setHistory(data);

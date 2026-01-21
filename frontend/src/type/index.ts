@@ -20,6 +20,7 @@ export interface GenerationHistory {
   ref_images?: string; // JSON 字符串数组
   type?: GenerationTypeValue; // 生成类型
   error_msg?: string;  // 错误信息（失败时）
+  image_deleted?: boolean; // 图片是否已被删除
   created_at: string;
   updated_at?: string;
   // 多图生成批次信息

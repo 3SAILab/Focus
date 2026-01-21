@@ -595,6 +595,22 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 	utils.LogAPI("发送 SSE complete 事件: status=%s, success_count=%d, total_count=%d", status, successCount, count)
 	c.SSEvent("message", string(completeJSON))
 	c.Writer.Flush()
+
+	// 明确结束 SSE 流 - 多种方式确保连接关闭
+	// 1. 发送两个换行符（SSE 协议标准结束方式）
+	c.Writer.Write([]byte("\n\n"))
+	c.Writer.Flush()
+
+	// 2. 强制 flush
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	// 3. 设置连接关闭头
+	c.Header("Connection", "close")
+
+	// 4. 立即返回，让 Gin 关闭连接
+	utils.LogAPI("SSE 流已结束，连接即将关闭")
 }
 
 // callAIAPIForImage 调用 AI API 生成单张图片

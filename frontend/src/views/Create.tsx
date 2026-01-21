@@ -62,7 +62,7 @@ export default function Create() {
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const PAGE_SIZE = 20;
+  const PAGE_SIZE = 20; // 创作空间只显示最近 20 条记录
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -256,30 +256,41 @@ export default function Create() {
   });
 
   // 监听 GlobalTaskContext 中的完成和失败任务
+  // 修复：双向检查 - 既检查 pendingTask 是否完成，也检查完成的任务是否有对应的 pendingTask
   useEffect(() => {
-    if (!currentTaskId) return;
-    
     const checkInterval = setInterval(() => {
-      // 检查完成的任务
-      const completedTask = getCompletedTask(currentTaskId);
-      if (completedTask) {
-        console.log('[Create] Detected completed task from GlobalTaskContext:', currentTaskId);
-        handleTaskComplete(completedTask);
-        clearCompletedTask(currentTaskId);
-        return;
-      }
+      if (pendingTasks.length === 0) return;
       
-      // 检查失败的任务
-      const failedTask = getFailedTask(currentTaskId);
-      if (failedTask) {
-        console.log('[Create] Detected failed task from GlobalTaskContext:', currentTaskId);
-        handleTaskFailed(failedTask);
-        clearFailedTask(currentTaskId);
-      }
+      console.log('[Create] Checking', pendingTasks.length, 'pending tasks for completion');
+      
+      // 方向1：检查所有 pendingTasks 是否完成或失败
+      pendingTasks.forEach(pending => {
+        if (!pending.taskId) {
+          console.log('[Create] Pending task', pending.id, 'has no taskId yet');
+          return; // 跳过还没有 taskId 的任务
+        }
+        
+        // 检查完成的任务
+        const completedTask = getCompletedTask(pending.taskId);
+        if (completedTask) {
+          console.log('[Create] Detected completed task from GlobalTaskContext:', pending.taskId);
+          handleTaskComplete(completedTask);
+          clearCompletedTask(pending.taskId);
+          return;
+        }
+        
+        // 检查失败的任务
+        const failedTask = getFailedTask(pending.taskId);
+        if (failedTask) {
+          console.log('[Create] Detected failed task from GlobalTaskContext:', pending.taskId);
+          handleTaskFailed(failedTask);
+          clearFailedTask(pending.taskId);
+        }
+      });
     }, 500);
     
     return () => clearInterval(checkInterval);
-  }, [currentTaskId, getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask, handleTaskComplete, handleTaskFailed]);
+  }, [pendingTasks, getCompletedTask, clearCompletedTask, getFailedTask, clearFailedTask, handleTaskComplete, handleTaskFailed]);
 
   // Use usePromptPopulation hook - Requirements: 4.1
   const {
@@ -825,6 +836,24 @@ export default function Create() {
               p.id === tempId ? { ...p, taskId } : p
             ));
           }
+          
+          // 立即检查任务是否已经完成（处理快速完成的情况）
+          setTimeout(() => {
+            const completedTask = getCompletedTask(taskId);
+            if (completedTask) {
+              console.log('[Create] Task already completed when created:', taskId);
+              handleTaskComplete(completedTask);
+              clearCompletedTask(taskId);
+              return;
+            }
+            
+            const failedTask = getFailedTask(taskId);
+            if (failedTask) {
+              console.log('[Create] Task already failed when created:', taskId);
+              handleTaskFailed(failedTask);
+              clearFailedTask(taskId);
+            }
+          }, 100); // 短暂延迟确保 pendingTask 已更新
         }}
         promptVersion={promptUpdateKey}
       />

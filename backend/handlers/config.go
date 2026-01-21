@@ -207,11 +207,11 @@ func checkVectorEngine(apiKey string) TokenValidationResult {
 	}
 
 	// 根据分组确定单张成本
-	// 限时特价: 0.159/张
-	// 优质gemini（默认）: 0.265/张
-	costPerImage := 0.265
+	// 限时特价: 0.099/张
+	// 优质gemini（默认）: 0.165/张
+	costPerImage := 0.165
 	if group == "限时特价" {
-		costPerImage = 0.159
+		costPerImage = 0.099
 	}
 
 	// VectorEngine 算法

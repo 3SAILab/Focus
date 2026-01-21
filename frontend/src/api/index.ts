@@ -557,8 +557,10 @@ export const api = {
                     callbacks.onImage?.(event);
                     break;
                   case 'complete':
-                    console.log('[SSE] Complete event:', event);
+                    console.log('[SSE] Complete event 收到:', event);
+                    console.log('[SSE] 调用 callbacks.onComplete');
                     callbacks.onComplete?.(event);
+                    console.log('[SSE] callbacks.onComplete 调用完成');
                     break;
                 }
               } catch (e) {

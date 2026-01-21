@@ -209,7 +209,7 @@ export default function ImageUploadZone({
           />
           <button
             onClick={onClear}
-            className="absolute top-3 right-3 w-8 h-8 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-all"
+            className="absolute top-3 right-3 w-8 h-8 bg-black/50 hover:bg-red-500 text-white rounded-full flex items-center justify-center transition-all hover:scale-110"
             data-testid="image-upload-clear-button"
           >
             <X className="w-4 h-4" />

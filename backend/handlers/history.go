@@ -31,6 +31,7 @@ func convertHistoryToResponse(history []models.GenerationHistory) []models.Gener
 			FileName:       h.FileName,
 			RefImages:      refImages,
 			Type:           h.Type,
+			ImageDeleted:   h.ImageDeleted,
 			CreatedAt:      h.CreatedAt,
 			UpdatedAt:      h.UpdatedAt,
 			BatchID:        h.BatchID,
@@ -63,8 +64,10 @@ func parsePageParams(c *gin.Context) (int, int) {
 // 只返回成功生成的记录（有 image_url 的），不包含失败记录
 func HistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
+	// 明确过滤掉被软删除的记录（deleted_at IS NULL）
 	query := config.DB.Model(&models.GenerationHistory{}).
-		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
+		Where("image_url != '' AND image_url IS NOT NULL").
+		Where("deleted_at IS NULL") // 明确排除被软删除的记录
 
 	dateStr := c.Query("date")
 	if dateStr != "" {
@@ -254,7 +257,7 @@ func deleteImageFile(imageURL string) {
 }
 
 // DeleteHistoryHandler 删除历史记录
-// 同时删除数据库记录和 output 目录中的图片文件
+// 只删除 output 目录中的图片文件，数据库记录保留并标记为已删除
 // 不影响生成次数统计
 func DeleteHistoryHandler(c *gin.Context) {
 	idStr := c.Param("id")
@@ -274,9 +277,9 @@ func DeleteHistoryHandler(c *gin.Context) {
 	// 删除图片文件
 	deleteImageFile(history.ImageURL)
 
-	// 软删除记录（GORM 会自动设置 deleted_at 字段）
-	if err := config.DB.Delete(&history).Error; err != nil {
-		c.JSON(500, gin.H{"error": "删除记录失败"})
+	// 标记记录为已删除（保留数据库记录）
+	if err := config.DB.Model(&history).Update("image_deleted", true).Error; err != nil {
+		c.JSON(500, gin.H{"error": "更新记录失败"})
 		return
 	}
 
@@ -284,6 +287,7 @@ func DeleteHistoryHandler(c *gin.Context) {
 }
 
 // BatchDeleteHistoryHandler 批量删除历史记录
+// 只删除图片文件，数据库记录保留并标记为已删除
 func BatchDeleteHistoryHandler(c *gin.Context) {
 	var req struct {
 		IDs []uint `json:"ids" binding:"required"`
@@ -308,10 +312,10 @@ func BatchDeleteHistoryHandler(c *gin.Context) {
 		deleteImageFile(h.ImageURL)
 	}
 
-	// 批量软删除
-	result := config.DB.Delete(&models.GenerationHistory{}, req.IDs)
+	// 批量标记为已删除（保留数据库记录）
+	result := config.DB.Model(&models.GenerationHistory{}).Where("id IN ?", req.IDs).Update("image_deleted", true)
 	if result.Error != nil {
-		c.JSON(500, gin.H{"error": "删除记录失败"})
+		c.JSON(500, gin.H{"error": "更新记录失败"})
 		return
 	}
 
@@ -322,7 +326,7 @@ func BatchDeleteHistoryHandler(c *gin.Context) {
 }
 
 // DeleteHistoryByBatchHandler 按批次 ID 删除历史记录
-// 删除同一批次的所有图片记录和文件，不影响生成次数
+// 只删除图片文件，数据库记录保留并标记为已删除
 func DeleteHistoryByBatchHandler(c *gin.Context) {
 	batchID := c.Param("batch_id")
 	if batchID == "" {
@@ -348,10 +352,10 @@ func DeleteHistoryByBatchHandler(c *gin.Context) {
 		deleteImageFile(h.ImageURL)
 	}
 
-	// 批量软删除
-	deleteResult := config.DB.Where("batch_id = ?", batchID).Delete(&models.GenerationHistory{})
+	// 批量标记为已删除（保留数据库记录）
+	deleteResult := config.DB.Model(&models.GenerationHistory{}).Where("batch_id = ?", batchID).Update("image_deleted", true)
 	if deleteResult.Error != nil {
-		c.JSON(500, gin.H{"error": "删除批次记录失败"})
+		c.JSON(500, gin.H{"error": "更新批次记录失败"})
 		return
 	}
 
@@ -362,6 +366,7 @@ func DeleteHistoryByBatchHandler(c *gin.Context) {
 }
 
 // DeleteHistoryByDateHandler 按日期删除历史记录
+// 只删除图片文件，数据库记录保留并标记为已删除
 func DeleteHistoryByDateHandler(c *gin.Context) {
 	dateStr := c.Param("date")
 
@@ -389,12 +394,13 @@ func DeleteHistoryByDateHandler(c *gin.Context) {
 		deleteImageFile(h.ImageURL)
 	}
 
-	// 批量软删除
-	result := config.DB.Where("created_at >= ? AND created_at < ?", startOfDay, endOfDay).
-		Delete(&models.GenerationHistory{})
+	// 批量标记为已删除（保留数据库记录）
+	result := config.DB.Model(&models.GenerationHistory{}).
+		Where("created_at >= ? AND created_at < ?", startOfDay, endOfDay).
+		Update("image_deleted", true)
 
 	if result.Error != nil {
-		c.JSON(500, gin.H{"error": "删除记录失败"})
+		c.JSON(500, gin.H{"error": "更新记录失败"})
 		return
 	}
 

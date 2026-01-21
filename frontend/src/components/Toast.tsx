@@ -103,7 +103,7 @@ export default function ToastItem({ toast, onClose }: ToastProps) {
       </div>
       <button
         onClick={handleClose}
-        className="flex-shrink-0 p-1 rounded-lg transition-colors opacity-60 hover:opacity-100"
+        className="flex-shrink-0 p-1 rounded-lg hover:bg-gray-200/50 transition-colors opacity-60 hover:opacity-100"
         aria-label="关闭"
       >
         <X className="w-4 h-4" />

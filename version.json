@@ -1,7 +1,7 @@
 {
   "versionCode": "202601161321",
   "versionName": "1.0.5",
-  "updateContent": "1. 修复了查不到key的问题",
+  "updateContent": "修复了部分用户查不到key的问题",
   "windowsUrl": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus.zip",
   "macX64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-x64.zip",
   "macArm64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-x64.zip"
