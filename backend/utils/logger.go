@@ -34,19 +34,19 @@ func initAPILogger() {
 		if enableLog == "true" || enableLog == "1" {
 			apiLogEnabled = true
 		}
-		
+
 		if !apiLogEnabled {
 			return
 		}
-		
+
 		logDir := os.Getenv("LOG_DIR")
 		if logDir == "" {
 			logDir = "./logs"
 		}
-		
+
 		// 确保日志目录存在
 		os.MkdirAll(logDir, 0755)
-		
+
 		logPath := filepath.Join(logDir, "api.log")
 		var err error
 		apiLogFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -55,7 +55,7 @@ func initAPILogger() {
 			APILogger = log.New(os.Stdout, "[API] ", log.LstdFlags|log.Lmicroseconds)
 			return
 		}
-		
+
 		APILogger = log.New(apiLogFile, "[API] ", log.LstdFlags|log.Lmicroseconds)
 	})
 }
@@ -87,7 +87,7 @@ func maskSensitiveURL(url string) string {
 		// 通用敏感词替换
 		{"gemini", "sigma"},
 	}
-	
+
 	result := url
 	for _, item := range sensitiveURLs {
 		if len(item.sensitive) > 0 {
@@ -125,15 +125,15 @@ func LogAPIRequest(method, url string, body interface{}) {
 	if !apiLogEnabled || APILogger == nil {
 		return
 	}
-	
+
 	// 伪装敏感 URL
 	maskedURL := maskSensitiveURL(url)
-	
+
 	APILogger.Printf("========== API REQUEST ==========")
 	APILogger.Printf("Time: %s", time.Now().Format("2006-01-02 15:04:05.000"))
 	APILogger.Printf("Method: %s", method)
 	APILogger.Printf("URL: %s", maskedURL)
-	
+
 	if body != nil {
 		// 序列化并清理敏感数据
 		b, _ := json.Marshal(body)
@@ -152,18 +152,18 @@ func LogAPIResponse(statusCode int, duration time.Duration, body interface{}, er
 	if !apiLogEnabled || APILogger == nil {
 		return
 	}
-	
+
 	APILogger.Printf("========== API RESPONSE ==========")
 	APILogger.Printf("Time: %s", time.Now().Format("2006-01-02 15:04:05.000"))
 	APILogger.Printf("Status Code: %d", statusCode)
 	APILogger.Printf("Duration: %v", duration)
-	
+
 	if err != nil {
 		// 伪装错误信息中的敏感 URL
 		maskedErr := maskSensitiveURL(err.Error())
 		APILogger.Printf("Error: %s", maskedErr)
 	}
-	
+
 	if body != nil {
 		// 序列化并清理敏感数据
 		b, _ := json.Marshal(body)
@@ -200,6 +200,31 @@ func RecursivelyMaskBase64(data interface{}) interface{} {
 			if k == "thoughtSignature" {
 				if s, ok := val.(string); ok && len(s) > 100 {
 					newMap[k] = fmt.Sprintf("[THOUGHT_SIGNATURE_PLACEHOLDER length=%d]", len(s))
+					continue
+				}
+			}
+			// 处理 text 字段中的 base64 图片（如 ![image](data:image/jpeg;base64,...)）
+			if k == "text" {
+				if s, ok := val.(string); ok {
+					// 检查是否包含 base64 图片
+					if len(s) > 100 && (indexOf(s, "data:image/") != -1 || indexOf(s, ";base64,") != -1) {
+						// 提取 base64 部分的长度
+						base64Start := indexOf(s, ";base64,")
+						if base64Start != -1 {
+							base64Data := s[base64Start+8:] // 跳过 ";base64,"
+							// 找到 base64 数据的结束位置（通常是 ) 或字符串结尾）
+							base64End := indexOf(base64Data, ")")
+							if base64End == -1 {
+								base64End = len(base64Data)
+							}
+							base64Length := base64End
+							// 替换为占位符
+							newMap[k] = fmt.Sprintf("![image](data:image/...;base64,[BASE64_PLACEHOLDER length=%d])", base64Length)
+							continue
+						}
+					}
+					// 如果不是 base64 图片，正常处理
+					newMap[k] = maskSensitiveURL(s)
 					continue
 				}
 			}

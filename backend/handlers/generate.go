@@ -175,16 +175,56 @@ func isQuotaError(errorMessage string) bool {
 }
 
 // extractImageURLFromMarkdown 从 markdown 文本中提取图片 URL
-// 支持格式: ![image](https://...) 或 ![任意文字](https://...)
+// 支持格式:
+// 1. ![image](https://...) - HTTP/HTTPS URL
+// 2. ![image](data:image/jpeg;base64,...) - Base64 data URL
 func extractImageURLFromMarkdown(text string) string {
 	// 匹配 markdown 图片格式: ![...](URL)
-	// 正则: !\[.*?\]\((https?://[^\s\)]+)\)
-	re := regexp.MustCompile(`!\[.*?\]\((https?://[^\s\)]+)\)`)
+	// 支持 http/https URL 和 data URL
+	re := regexp.MustCompile(`!\[.*?\]\(((?:https?://[^\s\)]+|data:image/[^;]+;base64,[^\s\)]+))\)`)
 	matches := re.FindStringSubmatch(text)
 	if len(matches) > 1 {
 		return matches[1]
 	}
 	return ""
+}
+
+// saveBase64Image 保存 base64 图片到本地
+func saveBase64Image(dataURL string) (string, error) {
+	utils.LogAPI("开始处理 base64 图片")
+
+	// 解析 data URL: data:image/jpeg;base64,/9j/4AAQ...
+	re := regexp.MustCompile(`^data:image/([^;]+);base64,(.+)$`)
+	matches := re.FindStringSubmatch(dataURL)
+	if len(matches) != 3 {
+		return "", fmt.Errorf("无效的 base64 data URL 格式")
+	}
+
+	mimeType := matches[1] // jpeg, png, etc.
+	base64Data := matches[2]
+
+	// 解码 base64
+	imgData, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", fmt.Errorf("解码 base64 失败: %w", err)
+	}
+
+	// 确定文件扩展名
+	ext := "." + mimeType
+	if mimeType == "jpeg" {
+		ext = ".jpg"
+	}
+
+	// 保存到本地
+	fileName := fmt.Sprintf("gen_%d%s", time.Now().UnixNano(), ext)
+	savePath := filepath.Join(config.OutputDir, fileName)
+	if err := os.WriteFile(savePath, imgData, 0644); err != nil {
+		return "", fmt.Errorf("保存图片失败: %w", err)
+	}
+
+	relativeImageURL := fmt.Sprintf("images/%s", fileName)
+	utils.LogAPI("base64 图片保存成功: %s (%d bytes)", relativeImageURL, len(imgData))
+	return relativeImageURL, nil
 }
 
 // downloadAndSaveImage 下载图片并保存到本地
@@ -300,34 +340,66 @@ func callAIAPI(apiURL, currentToken string, payloadBytes []byte, taskID string) 
 		return AICallResult{Success: false, ErrorMessage: "模型未返回内容"}
 	}
 
-	// 提取图片
+	// 提取图片 - 尝试多种方式，只有全部失败才报错
+	var lastError error
+
 	for _, part := range aiResp.Candidates[0].Content.Parts {
-		// 优先处理 inlineData 格式（base64 图片）
-		if part.InlineData != nil {
+		// 方式1: 优先处理 inlineData 格式（base64 图片）
+		if part.InlineData != nil && part.InlineData.Data != "" {
 			imgData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
-			if err == nil {
-				fileName := fmt.Sprintf("gen_%d.png", time.Now().UnixNano())
-				savePath := filepath.Join(config.OutputDir, fileName)
-				os.WriteFile(savePath, imgData, 0644)
-				relativeImageURL := fmt.Sprintf("images/%s", fileName)
-				return AICallResult{Success: true, ImageURL: relativeImageURL}
+			if err != nil {
+				lastError = fmt.Errorf("inlineData base64 解码失败: %w", err)
+				utils.LogAPI("inlineData base64 解码失败: %v", err)
+				continue // 继续尝试其他方式
 			}
+
+			fileName := fmt.Sprintf("gen_%d.png", time.Now().UnixNano())
+			savePath := filepath.Join(config.OutputDir, fileName)
+			if err := os.WriteFile(savePath, imgData, 0644); err != nil {
+				lastError = fmt.Errorf("保存 inlineData 图片失败: %w", err)
+				utils.LogAPI("保存 inlineData 图片失败: %v", err)
+				continue // 继续尝试其他方式
+			}
+
+			relativeImageURL := fmt.Sprintf("images/%s", fileName)
+			utils.LogAPI("图片生成成功（inlineData 模式）: %s", relativeImageURL)
+			return AICallResult{Success: true, ImageURL: relativeImageURL}
 		}
 
-		// 处理 text 字段中的 markdown 图片 URL（如 ![image](https://...)）
+		// 方式2: 处理 text 字段中的 markdown 图片 URL（如 ![image](https://...) 或 ![image](data:image/jpeg;base64,...)）
 		if part.Text != "" {
 			imageURL := extractImageURLFromMarkdown(part.Text)
 			if imageURL != "" {
-				// 下载图片并保存到本地
-				localURL, err := downloadAndSaveImage(imageURL)
-				if err == nil {
+				// 检查是否是 base64 data URL
+				if strings.HasPrefix(imageURL, "data:image/") {
+					// 保存 base64 图片到本地
+					localURL, err := saveBase64Image(imageURL)
+					if err != nil {
+						lastError = fmt.Errorf("text base64 保存失败: %w", err)
+						utils.LogAPI("text base64 保存失败: %v", err)
+						continue // 继续尝试其他方式
+					}
+					utils.LogAPI("图片生成成功（text base64 模式）: %s", localURL)
+					return AICallResult{Success: true, ImageURL: localURL}
+				} else {
+					// 下载 HTTP/HTTPS 图片并保存到本地
+					localURL, err := downloadAndSaveImage(imageURL)
+					if err != nil {
+						lastError = fmt.Errorf("下载 HTTP 图片失败: %w", err)
+						utils.LogAPI("下载图片失败: %s, 错误: %v", imageURL, err)
+						continue // 继续尝试其他方式
+					}
+					utils.LogAPI("图片生成成功（HTTP URL 模式）: %s", localURL)
 					return AICallResult{Success: true, ImageURL: localURL}
 				}
-				utils.LogAPI("下载图片失败: %s, 错误: %v", imageURL, err)
 			}
 		}
 	}
 
+	// 所有方式都失败了
+	if lastError != nil {
+		return AICallResult{Success: false, ErrorMessage: fmt.Sprintf("请求成功但图片处理失败: %v", lastError)}
+	}
 	return AICallResult{Success: false, ErrorMessage: "请求成功但未返回图片，请修改提示词后重试"}
 }
 
@@ -715,40 +787,66 @@ func callAIAPIInternal(apiURL, currentToken string, payloadBytes []byte, index i
 		return ImageResult{Error: "模型未返回内容", Index: index}
 	}
 
-	// 提取图片
-	for _, part := range aiResp.Candidates[0].Content.Parts {
-		// 优先处理 inlineData 格式（base64 图片）
-		if part.InlineData != nil {
-			imgData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
-			if err == nil {
-				fileName := fmt.Sprintf("gen_%d.png", time.Now().UnixNano())
-				savePath := filepath.Join(config.OutputDir, fileName)
-				if err := os.WriteFile(savePath, imgData, 0644); err != nil {
-					utils.LogAPI("图片 %d 保存失败: %s", index+1, err.Error())
-					return ImageResult{Error: "保存图片失败", Index: index}
-				}
+	// 提取图片 - 尝试多种方式，只有全部失败才报错
+	var lastError error
 
-				relativeImageURL := fmt.Sprintf("images/%s", fileName)
-				utils.LogAPI("图片 %d 生成成功: %s (耗时: %v)", index+1, relativeImageURL, requestDuration)
-				return ImageResult{ImageURL: relativeImageURL, Index: index}
-			} else {
-				utils.LogAPI("图片 %d 解码 base64 失败: %s", index+1, err.Error())
+	for _, part := range aiResp.Candidates[0].Content.Parts {
+		// 方式1: 优先处理 inlineData 格式（base64 图片）
+		if part.InlineData != nil && part.InlineData.Data != "" {
+			imgData, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
+			if err != nil {
+				lastError = fmt.Errorf("inlineData base64 解码失败: %w", err)
+				utils.LogAPI("图片 %d inlineData base64 解码失败: %v", index+1, err)
+				continue // 继续尝试其他方式
 			}
+
+			fileName := fmt.Sprintf("gen_%d.png", time.Now().UnixNano())
+			savePath := filepath.Join(config.OutputDir, fileName)
+			if err := os.WriteFile(savePath, imgData, 0644); err != nil {
+				lastError = fmt.Errorf("保存 inlineData 图片失败: %w", err)
+				utils.LogAPI("图片 %d 保存 inlineData 失败: %s", index+1, err.Error())
+				continue // 继续尝试其他方式
+			}
+
+			relativeImageURL := fmt.Sprintf("images/%s", fileName)
+			utils.LogAPI("图片 %d 生成成功（inlineData 模式）: %s (耗时: %v)", index+1, relativeImageURL, requestDuration)
+			return ImageResult{ImageURL: relativeImageURL, Index: index}
 		}
 
-		// 处理 text 字段中的 markdown 图片 URL（如 ![image](https://...)）
+		// 方式2: 处理 text 字段中的 markdown 图片 URL（如 ![image](https://...) 或 ![image](data:image/jpeg;base64,...)）
 		if part.Text != "" {
 			imageURL := extractImageURLFromMarkdown(part.Text)
 			if imageURL != "" {
-				// 下载图片并保存到本地
-				localURL, err := downloadAndSaveImage(imageURL)
-				if err == nil {
-					utils.LogAPI("图片 %d 生成成功（URL模式）: %s (耗时: %v)", index+1, localURL, requestDuration)
+				// 检查是否是 base64 data URL
+				if strings.HasPrefix(imageURL, "data:image/") {
+					// 保存 base64 图片到本地
+					localURL, err := saveBase64Image(imageURL)
+					if err != nil {
+						lastError = fmt.Errorf("text base64 保存失败: %w", err)
+						utils.LogAPI("图片 %d text base64 保存失败: %v", index+1, err)
+						continue // 继续尝试其他方式
+					}
+					utils.LogAPI("图片 %d 生成成功（text base64 模式）: %s (耗时: %v)", index+1, localURL, requestDuration)
+					return ImageResult{ImageURL: localURL, Index: index}
+				} else {
+					// 下载 HTTP/HTTPS 图片并保存到本地
+					localURL, err := downloadAndSaveImage(imageURL)
+					if err != nil {
+						lastError = fmt.Errorf("下载 HTTP 图片失败: %w", err)
+						utils.LogAPI("图片 %d 下载失败: %s, 错误: %v", index+1, imageURL, err)
+						continue // 继续尝试其他方式
+					}
+					utils.LogAPI("图片 %d 生成成功（HTTP URL 模式）: %s (耗时: %v)", index+1, localURL, requestDuration)
 					return ImageResult{ImageURL: localURL, Index: index}
 				}
-				utils.LogAPI("图片 %d 下载失败: %s, 错误: %v", index+1, imageURL, err)
 			}
 		}
+	}
+
+	// 所有方式都失败了
+	if lastError != nil {
+		utils.LogAPI("图片 %d 所有处理方式都失败，最后错误: %v", index+1, lastError)
+		return ImageResult{Error: fmt.Sprintf("图片处理失败: %v", lastError), Index: index}
 	}
 
 	utils.LogAPI("图片 %d 未找到图片数据", index+1)

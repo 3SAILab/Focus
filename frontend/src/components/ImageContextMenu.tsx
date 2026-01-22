@@ -98,9 +98,40 @@ export default function ImageContextMenu({
     try {
       const response = await fetch(imageUrl);
       const blob = await response.blob();
+      
+      // 将图片转换为 PNG 格式，因为剪贴板对 PNG 支持更好
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = URL.createObjectURL(blob);
+      });
+      
+      // 创建 canvas 并绘制图片
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('无法创建 canvas context');
+      
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(img.src);
+      
+      // 转换为 PNG blob
+      const pngBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('转换图片格式失败'));
+        }, 'image/png');
+      });
+      
+      // 写入剪贴板
       await navigator.clipboard.write([
-        new ClipboardItem({ [blob.type]: blob }),
+        new ClipboardItem({ 'image/png': pngBlob }),
       ]);
+      
       toast.success('图片已复制到剪贴板');
     } catch (error) {
       console.error('复制图片失败:', error);

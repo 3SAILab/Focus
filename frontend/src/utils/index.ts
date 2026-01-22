@@ -120,15 +120,49 @@ export async function downloadImage(url: string): Promise<boolean> {
 
 /**
  * 从 URL 加载图片为 File 对象
+ * 支持 HTTP/HTTPS URL 和 base64 data URL
  */
 export async function loadImageAsFile(url: string): Promise<File | null> {
   try {
+    // 处理 base64 data URL
+    if (url.startsWith('data:')) {
+      console.log('[loadImageAsFile] 检测到 base64 图片');
+      // 从 data URL 中提取 MIME 类型和 base64 数据
+      const matches = url.match(/^data:([^;]+);base64,(.+)$/);
+      if (!matches) {
+        console.error('[loadImageAsFile] 无效的 base64 格式');
+        return null;
+      }
+      
+      const mimeType = matches[1];
+      const base64Data = matches[2];
+      
+      // 将 base64 转换为 Blob
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+      
+      // 根据 MIME 类型生成文件名
+      const extension = mimeType.split('/')[1] || 'jpg';
+      const fileName = `ref_${Date.now()}.${extension}`;
+      
+      console.log('[loadImageAsFile] base64 图片转换成功:', fileName, blob.size, 'bytes');
+      return new File([blob], fileName, { type: mimeType });
+    }
+    
+    // 处理普通 HTTP/HTTPS URL
+    console.log('[loadImageAsFile] 加载 HTTP 图片:', url);
     const response = await fetch(url);
     const blob = await response.blob();
     const fileName = url.split('/').pop() || 'ref_image.jpg';
+    console.log('[loadImageAsFile] HTTP 图片加载成功:', fileName, blob.size, 'bytes');
     return new File([blob], fileName, { type: blob.type });
   } catch (error) {
-    console.error('加载图片失败:', error);
+    console.error('[loadImageAsFile] 加载图片失败:', error);
     return null;
   }
 }

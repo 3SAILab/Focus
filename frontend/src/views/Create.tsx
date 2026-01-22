@@ -318,17 +318,26 @@ export default function Create() {
     handleSSEComplete,
     handleSSEError,
   } = useSSEGeneration({
-    onBatchComplete: (batch) => setBatchResults(prev => [...prev, batch]),
+    onBatchComplete: (batch) => {
+      console.log('[Create] onBatchComplete 被调用，添加批次到 batchResults:', batch);
+      setBatchResults(prev => [...prev, batch]);
+    },
     loadHistory,
     updatePendingTaskBatchId,
     removePendingTask,
     onGenerationComplete: () => {
+      console.log('[Create] onGenerationComplete 被调用');
       setIsGenerating(false);
       setCounterRefresh(prev => prev + 1);
       setSelectedFiles([]);
     },
     onQuotaError: () => setShowQuotaError(true),
   });
+
+  // 监控 streamingBatch 状态变化
+  useEffect(() => {
+    console.log('[Create] streamingBatch 状态变化:', streamingBatch ? `存在 (batchId: ${streamingBatch.batchId})` : 'null');
+  }, [streamingBatch]);
 
   // Use useDeleteConfirmation hook - Requirements: 7.1
   const {
@@ -610,23 +619,34 @@ export default function Create() {
   };
 
   // 重试失败的生成（用于 HistorySingleItem）
-  const handleRetry = useCallback((prompt: string) => {
-    setSelectedPrompt(prompt);
-    setTimeout(() => setTriggerGenerate(true), 100);
-  }, [setSelectedPrompt, setTriggerGenerate]);
+  const handleRetry = useCallback(async (prompt: string) => {
+    console.log('[Create] handleRetry 被调用，prompt:', prompt);
+    await populatePromptBar({
+      prompt,
+      imageCount: 1,
+      autoTrigger: true,
+    });
+  }, [populatePromptBar]);
 
   // 编辑失败记录的提示词
-  const handleEditFailedPrompt = useCallback((prompt: string) => {
-    setSelectedPrompt(prompt);
-    setTimeout(scrollToBottom, 100);
-    toast.success('已填充提示词，可编辑后发送');
-  }, [setSelectedPrompt, scrollToBottom, toast]);
+  const handleEditFailedPrompt = useCallback(async (prompt: string) => {
+    console.log('[Create] handleEditFailedPrompt 被调用，prompt:', prompt);
+    await populatePromptBar({
+      prompt,
+      imageCount: 1,
+      autoTrigger: false,
+    });
+  }, [populatePromptBar]);
 
   // 重新生成失败记录
-  const handleRegenerateFailedPrompt = useCallback((prompt: string) => {
-    setSelectedPrompt(prompt);
-    setTimeout(() => setTriggerGenerate(true), 100);
-  }, [setSelectedPrompt, setTriggerGenerate]);
+  const handleRegenerateFailedPrompt = useCallback(async (prompt: string) => {
+    console.log('[Create] handleRegenerateFailedPrompt 被调用，prompt:', prompt);
+    await populatePromptBar({
+      prompt,
+      imageCount: 1,
+      autoTrigger: true,
+    });
+  }, [populatePromptBar]);
 
   // 批次重新生成（用于 HistoryBatchItem）
   const handleBatchRegenerate = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number) => {

@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowRight, Loader2, Settings, Upload, Grid2X2 } from 'lucide-react';
+import { ArrowRight, Loader2, Settings, Upload, Grid2X2, Maximize2 } from 'lucide-react';
 import ImageUpload from './ImageUpload';
 import AspectRatioSelector, { aspectRatiosConfig } from './AspectRatioSelector';
 import CountSelector from './CountSelector';
-import type { AspectRatio, GenerateResponse, GenerateMultiResponse, ImageCount, GenerationTypeValue } from '../type';
+import ImageSizeSelector from './ImageSizeSelector';
+import type { AspectRatio, GenerateResponse, GenerateMultiResponse, ImageCount, ImageSize, GenerationTypeValue } from '../type';
 import { GenerationType } from '../type';
 import type { SSEStartEvent, SSEImageEvent, SSECompleteEvent } from '../api';
 import { api } from '../api';
@@ -72,7 +73,9 @@ export default function PromptBar({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [files, setFiles] = useState<File[]>(initialFiles);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
+  const [imageSize, setImageSize] = useState<ImageSize>('2K');
   const [showAspectSelector, setShowAspectSelector] = useState(false);
+  const [showSizeSelector, setShowSizeSelector] = useState(false);
   const [isDragging, setIsDragging] = useState(false); // 拖拽状态
   const [imageCount, setImageCount] = useState<ImageCount>(1); // 生成数量状态
   const [showCountSelector, setShowCountSelector] = useState(false); // 数量选择器显示状态
@@ -81,6 +84,8 @@ export default function PromptBar({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const aspectSelectorRef = useRef<HTMLDivElement>(null);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const sizeSelectorRef = useRef<HTMLDivElement>(null);
+  const sizeBtnRef = useRef<HTMLButtonElement>(null);
   const countSelectorRef = useRef<HTMLDivElement>(null);
   const countBtnRef = useRef<HTMLButtonElement>(null);
   
@@ -92,16 +97,19 @@ export default function PromptBar({
   // 当 initialPrompt 或 promptVersion 变化时更新 prompt
   // promptVersion 用于强制更新，即使 initialPrompt 值相同
   useEffect(() => {
+    console.log('[PromptBar] initialPrompt 或 promptVersion 变化:', { initialPrompt, promptVersion });
     setPrompt(initialPrompt);
   }, [initialPrompt, promptVersion]);
 
   useEffect(() => {
+    console.log('[PromptBar] initialFiles 变化:', initialFiles.length, '个文件');
     setFiles(initialFiles);
   }, [initialFiles]);
 
   // 当 initialImageCount 或 promptVersion 变化时更新 imageCount
   // promptVersion 用于强制更新，即使 initialImageCount 值相同
   useEffect(() => {
+    console.log('[PromptBar] initialImageCount 或 promptVersion 变化:', { initialImageCount, promptVersion });
     setImageCount(initialImageCount);
   }, [initialImageCount, promptVersion]);
 
@@ -125,6 +133,18 @@ export default function PromptBar({
         setShowAspectSelector(false);
       }
       
+      // 处理尺寸选择器
+      if (sizeBtnRef.current && sizeBtnRef.current.contains(event.target as Node)) {
+        return;
+      }
+      if (
+        showSizeSelector &&
+        sizeSelectorRef.current &&
+        !sizeSelectorRef.current.contains(event.target as Node)
+      ) {
+        setShowSizeSelector(false);
+      }
+      
       // 处理数量选择器
       if (countBtnRef.current && countBtnRef.current.contains(event.target as Node)) {
         return;
@@ -139,7 +159,7 @@ export default function PromptBar({
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showAspectSelector, showCountSelector]);
+  }, [showAspectSelector, showSizeSelector, showCountSelector]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -306,7 +326,7 @@ export default function PromptBar({
       const formData = new FormData();
       formData.append('prompt', currentPrompt || ' ');
       formData.append('aspectRatio', currentAspectRatio);
-      formData.append('imageSize', '2K');
+      formData.append('imageSize', imageSize);
       formData.append('count', String(currentImageCount));
       
       currentFiles.forEach((file) => {
@@ -494,6 +514,19 @@ export default function PromptBar({
             </div>
           )}
 
+          {showSizeSelector && (
+            <div ref={sizeSelectorRef} className="absolute bottom-[105%] right-0 z-50">
+              <ImageSizeSelector
+                value={imageSize}
+                onChange={(size) => {
+                  setImageSize(size);
+                  setShowSizeSelector(false);
+                }}
+                disabled={isDisabled}
+              />
+            </div>
+          )}
+
           {showCountSelector && (
             <div ref={countSelectorRef} className="absolute bottom-[105%] right-0 z-50">
               <CountSelector
@@ -511,6 +544,7 @@ export default function PromptBar({
             ref={settingsBtnRef}
             onClick={() => {
               setShowAspectSelector(!showAspectSelector);
+              setShowSizeSelector(false);
               setShowCountSelector(false); // 关闭数量选择器
             }}
             className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all border text-xs font-medium w-full ${
@@ -520,8 +554,26 @@ export default function PromptBar({
             }`}
             title="选择比例"
           >
-            <CurrentRatioIcon className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-300 ${showAspectSelector ? 'rotate-90' : ''}`} />
+            <CurrentRatioIcon className={`w-3.5 h-3.5 shrink-0 transition-transform duration-300 ${showAspectSelector ? 'rotate-90' : ''}`} />
             <span className="truncate">{aspectRatio}</span>
+          </button>
+
+          <button
+            ref={sizeBtnRef}
+            onClick={() => {
+              setShowSizeSelector(!showSizeSelector);
+              setShowAspectSelector(false);
+              setShowCountSelector(false);
+            }}
+            className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all border text-xs font-medium w-full ${
+              imageSize !== '2K' || showSizeSelector
+                ? 'bg-red-50 text-red-600 border-red-100' 
+                : 'bg-white text-gray-400 border-gray-200 hover:text-gray-600 hover:bg-gray-50'
+            }`}
+            title="选择尺寸"
+          >
+            <Maximize2 className={`w-3.5 h-3.5 shrink-0 transition-transform duration-300 ${showSizeSelector ? 'rotate-90' : ''}`} />
+            <span className="truncate">{imageSize}</span>
           </button>
 
           <button
@@ -529,6 +581,7 @@ export default function PromptBar({
             onClick={() => {
               setShowCountSelector(!showCountSelector);
               setShowAspectSelector(false); // 关闭比例选择器
+              setShowSizeSelector(false);
             }}
             className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all border text-xs font-medium w-full ${
               imageCount > 1 || showCountSelector
@@ -537,7 +590,7 @@ export default function PromptBar({
             }`}
             title="选择生成数量"
           >
-            <Grid2X2 className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-300 ${showCountSelector ? 'rotate-90' : ''}`} />
+            <Grid2X2 className={`w-3.5 h-3.5 shrink-0 transition-transform duration-300 ${showCountSelector ? 'rotate-90' : ''}`} />
             <span className="truncate">{imageCount}张</span>
           </button>
 

@@ -30,7 +30,8 @@ export const parseReferenceUrls = (
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       // 如果不是有效的 JSON，可能是单个 URL
-      if (refImages.startsWith('http') || refImages.startsWith('/')) {
+      // 支持 HTTP/HTTPS URL、本地路径和 base64 data URL
+      if (refImages.startsWith('http') || refImages.startsWith('/') || refImages.startsWith('data:')) {
         return [refImages];
       }
     }

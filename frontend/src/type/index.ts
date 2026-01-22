@@ -79,7 +79,7 @@ export type AspectRatio =
   | '2:3' 
   | '9:16';
 
-export type ImageSize = '2K';
+export type ImageSize = '2K' | '4K';
 
 // 生成数量类型 (1-4)
 export type ImageCount = 1 | 2 | 3 | 4;

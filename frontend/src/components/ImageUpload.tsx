@@ -171,7 +171,7 @@ export default function ImageUpload({
             return (
               <div
                 key={url}
-                draggable={enableReorder && isHovered}
+                draggable={enableReorder}
                 onDragStart={(e) => handleDragStart(e, index)}
                 onDragOver={(e) => handleDragOver(e, index)}
                 onDrop={(e) => handleDrop(e, index)}

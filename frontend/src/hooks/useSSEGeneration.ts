@@ -124,7 +124,8 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
    * Requirements: 6.3, 6.4
    */
   const handleSSEComplete = useCallback(async (event: SSECompleteEvent, tempId?: string) => {
-    console.log('[useSSEGeneration] SSE Complete 开始处理:', event);
+    console.log('[useSSEGeneration] ========== SSE Complete 开始处理 ==========');
+    console.log('[useSSEGeneration] Event:', event);
     console.log('[useSSEGeneration] tempId:', tempId);
 
     // 使用统一的 removePendingTask 函数清除对应的 pendingTask
@@ -157,7 +158,7 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
     // 获取当前的 streamingBatch 用于创建最终批次
     // 使用函数式更新来获取最新状态并清除
     setStreamingBatch(currentStreamingBatch => {
-      console.log('[useSSEGeneration] 当前 streamingBatch:', currentStreamingBatch);
+      console.log('[useSSEGeneration] setState 回调执行 - 当前 streamingBatch:', currentStreamingBatch);
       
       // 将流式批次移动到完成的批次列表
       if (currentStreamingBatch) {
@@ -175,19 +176,27 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
         });
         
         console.log('[useSSEGeneration] 创建最终批次:', finalBatch);
+        console.log('[useSSEGeneration] 调用 onBatchComplete');
         onBatchComplete(finalBatch);
+        console.log('[useSSEGeneration] onBatchComplete 调用完成');
       } else {
-        console.warn('[useSSEGeneration] 警告: currentStreamingBatch 为 null，无法创建最终批次');
+        console.warn('[useSSEGeneration] ⚠️ 警告: currentStreamingBatch 为 null，无法创建最终批次');
+        console.warn('[useSSEGeneration] 这可能意味着 streamingBatch 已经被清除或从未设置');
       }
       
-      // 清除流式批次状态
-      console.log('[useSSEGeneration] 清除 streamingBatch，返回 null');
+      // 清除流式批次状态 - 这是关键！
+      console.log('[useSSEGeneration] ✅ 清除 streamingBatch，返回 null');
       return null;
     });
+
+    // 等待一个微任务，确保 setState 已经执行
+    await Promise.resolve();
+    console.log('[useSSEGeneration] setState 应该已经执行完成');
 
     // 调用生成完成回调
     console.log('[useSSEGeneration] 调用 onGenerationComplete');
     onGenerationComplete?.();
+    console.log('[useSSEGeneration] onGenerationComplete 调用完成');
 
     // 如果有余额不足错误，触发回调
     if (hasQuotaError && onQuotaError) {
@@ -196,10 +205,11 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
     }
 
     // 重新加载历史记录
-    console.log('[useSSEGeneration] 重新加载历史记录');
+    console.log('[useSSEGeneration] 开始重新加载历史记录');
     await loadHistory();
+    console.log('[useSSEGeneration] 历史记录加载完成');
     
-    console.log('[useSSEGeneration] SSE Complete 处理完成');
+    console.log('[useSSEGeneration] ========== SSE Complete 处理完成 ==========');
   }, [onBatchComplete, loadHistory, removePendingTask, onGenerationComplete, onQuotaError]);
 
   /**
