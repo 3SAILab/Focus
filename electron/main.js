@@ -7,7 +7,7 @@ const versionChecker = require('./versionChecker');
 // ============ 开发环境日志开关 ============
 // 设置为 true 启用开发环境日志（控制台 + 文件）
 // 设置为 false 禁用所有日志
-const ENABLE_DEV_LOG = false;
+const ENABLE_DEV_LOG = true;
 // =========================================
 
 // ============ 生产环境日志开关 ============

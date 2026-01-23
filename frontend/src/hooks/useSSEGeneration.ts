@@ -33,18 +33,18 @@ export interface UseSSEGenerationParams {
  * Requirements: 6.2, 6.3
  */
 export interface UseSSEGenerationResult {
-  /** 当前流式生成的批次 */
-  streamingBatch: BatchResult | null;
+  /** 当前流式生成的批次 Map（支持多个并发批次） */
+  streamingBatches: Map<string, BatchResult>;
   /** SSE 开始事件处理 */
   handleSSEStart: (event: SSEStartEvent, tempId?: string) => void;
   /** SSE 图片事件处理 */
   handleSSEImage: (event: SSEImageEvent) => void;
   /** SSE 完成事件处理 */
   handleSSEComplete: (event: SSECompleteEvent, tempId?: string) => Promise<void>;
-  /** 清除流式批次状态 */
-  clearStreamingBatch: () => void;
+  /** 清除流式批次状态（可选指定 batchId） */
+  clearStreamingBatch: (batchId?: string) => void;
   /** SSE 错误处理（保留已成功的图片，标记未完成的为失败） */
-  handleSSEError: (errorMessage: string) => void;
+  handleSSEError: (errorMessage: string, batchId?: string) => void;
 }
 
 /**
@@ -60,14 +60,13 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
   const {
     onBatchComplete,
     loadHistory,
-    updatePendingTaskBatchId,
     removePendingTask,
     onGenerationComplete,
     onQuotaError,
   } = params;
 
-  // SSE 流式生成状态
-  const [streamingBatch, setStreamingBatch] = useState<BatchResult | null>(null);
+  // SSE 流式生成状态 - 支持多个并发批次
+  const [streamingBatches, setStreamingBatches] = useState<Map<string, BatchResult>>(new Map());
 
   /**
    * SSE 开始事件处理
@@ -75,22 +74,32 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
    * Requirements: 6.1
    */
   const handleSSEStart = useCallback((event: SSEStartEvent, tempId?: string) => {
+    console.log('[useSSEGeneration] SSE Start:', event, 'tempId:', tempId);
+    
     // 创建流式批次，初始化所有图片为 loading 状态
     const newBatch = createBatchResult({
       batchId: event.batch_id,
       prompt: event.prompt,
       imageCount: event.count,
       refImages: event.ref_images || [],
+      aspectRatio: event.aspect_ratio,
+      imageSize: event.image_size,
       status: 'streaming',
     });
 
-    // 使用 tempId 精确更新对应的 pendingTask
-    if (tempId && updatePendingTaskBatchId) {
-      updatePendingTaskBatchId(tempId, event.batch_id);
+    // 清除 pendingTask（SSE 模式下不需要 taskId，直接清除）
+    if (tempId && removePendingTask) {
+      console.log('[useSSEGeneration] 清除 pendingTask by tempId:', tempId);
+      removePendingTask({ tempId });
     }
 
-    setStreamingBatch(newBatch);
-  }, [updatePendingTaskBatchId]);
+    // 添加到 streamingBatches Map
+    setStreamingBatches(prev => {
+      const newMap = new Map(prev);
+      newMap.set(event.batch_id, newBatch);
+      return newMap;
+    });
+  }, [removePendingTask]);
 
   /**
    * SSE 图片事件处理
@@ -100,11 +109,21 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
   const handleSSEImage = useCallback((event: SSEImageEvent) => {
     console.log('[useSSEGeneration] SSE Image:', event);
     
-    setStreamingBatch(prev => {
-      if (!prev) return prev;
+    // 使用 event.batch_id 直接定位批次
+    setStreamingBatches(prev => {
+      const batch = prev.get(event.batch_id);
+      if (!batch) {
+        console.warn('[useSSEGeneration] 未找到批次:', event.batch_id);
+        return prev;
+      }
       
-      const newImages = [...prev.images];
-      // 如果有错误，使用 getErrorMessage 过滤敏感信息
+      // 检查索引是否有效
+      if (event.index < 0 || event.index >= batch.images.length) {
+        console.warn('[useSSEGeneration] 无效的图片索引:', event.index, '批次图片数量:', batch.images.length);
+        return prev;
+      }
+      
+      const newImages = [...batch.images];
       const errorMessage = event.error ? getErrorMessage(event.error).message : undefined;
       
       newImages[event.index] = {
@@ -114,7 +133,10 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
         index: event.index,
       };
       
-      return { ...prev, images: newImages };
+      const newMap = new Map(prev);
+      newMap.set(event.batch_id, { ...batch, images: newImages });
+      
+      return newMap;
     });
   }, []);
 
@@ -157,21 +179,24 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
 
     // 获取当前的 streamingBatch 用于创建最终批次
     // 使用函数式更新来获取最新状态并清除
-    setStreamingBatch(currentStreamingBatch => {
-      console.log('[useSSEGeneration] setState 回调执行 - 当前 streamingBatch:', currentStreamingBatch);
+    setStreamingBatches(currentBatches => {
+      const currentBatch = currentBatches.get(event.batch_id);
+      console.log('[useSSEGeneration] setState 回调执行 - 当前 batch:', currentBatch);
       
       // 将流式批次移动到完成的批次列表
-      if (currentStreamingBatch) {
+      if (currentBatch) {
         // 根据后端返回的 status 确定批次状态
         // status: 'success' | 'partial' | 'failed'
         const batchStatus = event.status === 'failed' ? 'failed' : 'completed';
         
         const finalBatch = createBatchResult({
-          batchId: currentStreamingBatch.batchId,
-          prompt: currentStreamingBatch.prompt,
+          batchId: currentBatch.batchId,
+          prompt: currentBatch.prompt,
           imageCount: event.images.length,
           images: processedImages,
-          refImages: event.ref_images || currentStreamingBatch.refImages || [],
+          refImages: event.ref_images || currentBatch.refImages || [],
+          aspectRatio: currentBatch.aspectRatio,
+          imageSize: currentBatch.imageSize,
           status: batchStatus,
         });
         
@@ -180,13 +205,14 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
         onBatchComplete(finalBatch);
         console.log('[useSSEGeneration] onBatchComplete 调用完成');
       } else {
-        console.warn('[useSSEGeneration] ⚠️ 警告: currentStreamingBatch 为 null，无法创建最终批次');
-        console.warn('[useSSEGeneration] 这可能意味着 streamingBatch 已经被清除或从未设置');
+        console.warn('[useSSEGeneration] ⚠️ 警告: 未找到批次', event.batch_id);
       }
       
-      // 清除流式批次状态 - 这是关键！
-      console.log('[useSSEGeneration] ✅ 清除 streamingBatch，返回 null');
-      return null;
+      // 清除该批次的流式状态
+      const newMap = new Map(currentBatches);
+      newMap.delete(event.batch_id);
+      console.log('[useSSEGeneration] ✅ 清除批次', event.batch_id, '剩余批次数:', newMap.size);
+      return newMap;
     });
 
     // 等待一个微任务，确保 setState 已经执行
@@ -215,49 +241,95 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
   /**
    * 清除流式批次状态
    * 用于错误处理或取消操作
+   * @param batchId - 可选，指定要清除的批次 ID。如果不指定，清除所有批次
    */
-  const clearStreamingBatch = useCallback(() => {
-    setStreamingBatch(null);
+  const clearStreamingBatch = useCallback((batchId?: string) => {
+    if (batchId) {
+      setStreamingBatches(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(batchId);
+        return newMap;
+      });
+    } else {
+      setStreamingBatches(new Map());
+    }
   }, []);
 
   /**
    * SSE 错误处理
    * 保留已成功的图片，把还在 loading 的图片标记为失败
+   * @param errorMessage - 错误消息
+   * @param batchId - 可选，指定要处理的批次 ID。如果不指定，处理所有批次
    */
-  const handleSSEError = useCallback((errorMessage: string) => {
-    console.log('[useSSEGeneration] SSE Error:', errorMessage);
+  const handleSSEError = useCallback((errorMessage: string, batchId?: string) => {
+    console.log('[useSSEGeneration] SSE Error:', errorMessage, 'batchId:', batchId);
     
-    setStreamingBatch(currentStreamingBatch => {
-      if (currentStreamingBatch) {
-        // 处理图片：保留已成功的，把 loading 的标记为失败
-        const processedImages = currentStreamingBatch.images.map((img) => {
-          if (img.isLoading) {
-            // 还在 loading 的图片标记为失败
-            return { ...img, isLoading: false, error: errorMessage };
+    setStreamingBatches(currentBatches => {
+      const newMap = new Map(currentBatches);
+      
+      // 如果指定了 batchId，只处理该批次
+      if (batchId) {
+        const batch = currentBatches.get(batchId);
+        if (batch) {
+          // 处理图片：保留已成功的，把 loading 的标记为失败
+          const processedImages = batch.images.map((img) => {
+            if (img.isLoading) {
+              return { ...img, isLoading: false, error: errorMessage };
+            }
+            return img;
+          });
+          
+          // 检查是否有成功的图片
+          const hasSuccess = processedImages.some(img => img.url && !img.error);
+          const allFailed = processedImages.every(img => img.error);
+          
+          const finalBatch: BatchResult = {
+            ...batch,
+            images: processedImages,
+            status: allFailed ? 'failed' : 'completed',
+          };
+          
+          onBatchComplete(finalBatch);
+          
+          // 如果有成功的图片，重新加载历史记录
+          if (hasSuccess) {
+            loadHistory();
           }
-          return img;
+          
+          // 清除该批次
+          newMap.delete(batchId);
+        }
+      } else {
+        // 没有指定 batchId，处理所有批次
+        currentBatches.forEach((batch) => {
+          const processedImages = batch.images.map((img) => {
+            if (img.isLoading) {
+              return { ...img, isLoading: false, error: errorMessage };
+            }
+            return img;
+          });
+          
+          const hasSuccess = processedImages.some(img => img.url && !img.error);
+          const allFailed = processedImages.every(img => img.error);
+          
+          const finalBatch: BatchResult = {
+            ...batch,
+            images: processedImages,
+            status: allFailed ? 'failed' : 'completed',
+          };
+          
+          onBatchComplete(finalBatch);
+          
+          if (hasSuccess) {
+            loadHistory();
+          }
         });
         
-        // 检查是否有成功的图片
-        const hasSuccess = processedImages.some(img => img.url && !img.error);
-        const allFailed = processedImages.every(img => img.error);
-        
-        const finalBatch: BatchResult = {
-          ...currentStreamingBatch,
-          images: processedImages,
-          status: allFailed ? 'failed' : 'completed',
-        };
-        
-        onBatchComplete(finalBatch);
-        
-        // 如果有成功的图片，重新加载历史记录
-        if (hasSuccess) {
-          loadHistory();
-        }
+        // 清除所有批次
+        newMap.clear();
       }
       
-      // 清除流式批次状态
-      return null;
+      return newMap;
     });
     
     // 调用生成完成回调
@@ -265,7 +337,7 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
   }, [onBatchComplete, loadHistory, onGenerationComplete]);
 
   return {
-    streamingBatch,
+    streamingBatches,
     handleSSEStart,
     handleSSEImage,
     handleSSEComplete,

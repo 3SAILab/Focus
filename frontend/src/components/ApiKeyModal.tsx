@@ -279,8 +279,8 @@ export default function ApiKeyModal({
             {/* 显示当前余额信息 */}
             {currentRemain !== null && (
               <div className="mt-2 pt-2 border-t border-gray-200 text-xs text-gray-600 space-y-0.5">
-                <p>剩余额度: <span className="font-medium text-green-600">{currentRemain.toLocaleString()}</span> 张</p>
-                {currentUsed !== null && <p>已用额度: {currentUsed.toLocaleString()} 张</p>}
+                <p>剩余额度: <span className="font-medium text-green-600">{currentRemain.toLocaleString()}</span> 点</p>
+                {currentUsed !== null && <p>已用额度: {currentUsed.toLocaleString()} 点</p>}
               </div>
             )}
           </div>
@@ -339,8 +339,8 @@ export default function ApiKeyModal({
                       验证成功
                     </p>
                     <div className="mt-1 text-xs text-green-700 space-y-0.5">
-                      <p>剩余额度: {validationResult.remain?.toLocaleString() || 0} 张</p>
-                      <p>已用额度: {validationResult.used?.toLocaleString() || 0} 张</p>
+                      <p>剩余额度: {validationResult.remain?.toLocaleString() || 0} 点</p>
+                      <p>已用额度: {validationResult.used?.toLocaleString() || 0} 点</p>
                     </div>
                   </>
                 ) : (

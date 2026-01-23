@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import type { GenerationHistory } from '../type';
+import type { GenerationHistory, AspectRatio, ImageSize } from '../type';
 import type { BatchResult } from '../type/generation';
 import { loadReferenceFiles } from '../utils/referenceImages';
 
@@ -25,6 +25,8 @@ export interface PopulatePromptParams {
   prompt: string;
   refImages?: string | string[];
   imageCount?: number;
+  aspectRatio?: AspectRatio;
+  imageSize?: ImageSize;
   autoTrigger: boolean;
 }
 
@@ -37,6 +39,8 @@ export interface UsePromptPopulationResult {
   selectedPrompt: string;
   selectedFiles: File[];
   selectedImageCount: 1 | 2 | 3 | 4;
+  selectedAspectRatio: AspectRatio;
+  selectedImageSize: ImageSize;
   promptUpdateKey: number;
   triggerGenerate: boolean;
   
@@ -44,6 +48,8 @@ export interface UsePromptPopulationResult {
   setSelectedPrompt: (prompt: string) => void;
   setSelectedFiles: (files: File[]) => void;
   setSelectedImageCount: (count: 1 | 2 | 3 | 4) => void;
+  setSelectedAspectRatio: (ratio: AspectRatio) => void;
+  setSelectedImageSize: (size: ImageSize) => void;
   setTriggerGenerate: (trigger: boolean) => void;
   
   // Actions
@@ -75,6 +81,8 @@ export function usePromptPopulation(
   const [selectedPrompt, setSelectedPrompt] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedImageCount, setSelectedImageCount] = useState<1 | 2 | 3 | 4>(1);
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatio>('1:1');
+  const [selectedImageSize, setSelectedImageSize] = useState<ImageSize>('2K');
   const [promptUpdateKey, setPromptUpdateKey] = useState(0);
   const [triggerGenerate, setTriggerGenerate] = useState(false);
 
@@ -84,16 +92,16 @@ export function usePromptPopulation(
    * Requirements: 4.3
    */
   const populatePromptBar = useCallback(async (params: PopulatePromptParams): Promise<void> => {
-    const { prompt, refImages, imageCount = 1, autoTrigger } = params;
+    const { prompt, refImages, imageCount = 1, aspectRatio = '1:1', imageSize = '2K', autoTrigger } = params;
     
-    console.log('[usePromptPopulation] populatePromptBar 被调用:', { prompt, refImages, imageCount, autoTrigger });
+    console.log('[usePromptPopulation] populatePromptBar 被调用:', { prompt, refImages, imageCount, aspectRatio, imageSize, autoTrigger });
     
     try {
       // 1. 加载参考图
       const refFiles = await loadReferenceFiles(refImages);
       console.log('[usePromptPopulation] 参考图加载完成:', refFiles.length, '个文件');
       
-      // 2. 设置提示词、参考图、图片数量
+      // 2. 设置提示词、参考图、图片数量、比例、尺寸
       setPromptUpdateKey(prev => {
         const newKey = prev + 1;
         console.log('[usePromptPopulation] 更新 promptUpdateKey:', prev, '->', newKey);
@@ -106,6 +114,10 @@ export function usePromptPopulation(
       const count = Math.min(Math.max(1, imageCount), 4) as 1 | 2 | 3 | 4;
       console.log('[usePromptPopulation] 设置 selectedImageCount:', count);
       setSelectedImageCount(count);
+      console.log('[usePromptPopulation] 设置 selectedAspectRatio:', aspectRatio);
+      setSelectedAspectRatio(aspectRatio);
+      console.log('[usePromptPopulation] 设置 selectedImageSize:', imageSize);
+      setSelectedImageSize(imageSize);
       
       // 3. 根据 autoTrigger 决定是否触发生成
       if (autoTrigger) {
@@ -130,6 +142,8 @@ export function usePromptPopulation(
         setSelectedPrompt(prompt);
         const count = Math.min(Math.max(1, imageCount), 4) as 1 | 2 | 3 | 4;
         setSelectedImageCount(count);
+        setSelectedAspectRatio(aspectRatio);
+        setSelectedImageSize(imageSize);
         setTimeout(() => setTriggerGenerate(true), 200);
       } else {
         toast.error('加载失败，请稍后重试');
@@ -147,6 +161,8 @@ export function usePromptPopulation(
       prompt: item.prompt || '',
       refImages: item.ref_images,
       imageCount: item.batch_total || 1,
+      aspectRatio: (item.aspect_ratio as AspectRatio) || '1:1',
+      imageSize: (item.image_size as ImageSize) || '2K',
       autoTrigger: true,
     });
   }, [populatePromptBar]);
@@ -161,6 +177,8 @@ export function usePromptPopulation(
       prompt: item.prompt || '',
       refImages: item.ref_images,
       imageCount: item.batch_total || 1,
+      aspectRatio: (item.aspect_ratio as AspectRatio) || '1:1',
+      imageSize: (item.image_size as ImageSize) || '2K',
       autoTrigger: false,
     });
   }, [populatePromptBar]);
@@ -174,6 +192,8 @@ export function usePromptPopulation(
       prompt: batch.prompt,
       refImages: batch.refImages,
       imageCount: batch.imageCount || 1,
+      aspectRatio: (batch.aspectRatio as AspectRatio) || '1:1',
+      imageSize: (batch.imageSize as ImageSize) || '2K',
       autoTrigger: true,
     });
   }, [populatePromptBar]);
@@ -187,6 +207,8 @@ export function usePromptPopulation(
       prompt: batch.prompt,
       refImages: batch.refImages,
       imageCount: batch.imageCount || 1,
+      aspectRatio: (batch.aspectRatio as AspectRatio) || '1:1',
+      imageSize: (batch.imageSize as ImageSize) || '2K',
       autoTrigger: false,
     });
   }, [populatePromptBar]);
@@ -199,6 +221,8 @@ export function usePromptPopulation(
     setSelectedPrompt('');
     setSelectedFiles([]);
     setSelectedImageCount(1);
+    setSelectedAspectRatio('1:1');
+    setSelectedImageSize('2K');
     setTriggerGenerate(false);
   }, []);
 
@@ -207,6 +231,8 @@ export function usePromptPopulation(
     selectedPrompt,
     selectedFiles,
     selectedImageCount,
+    selectedAspectRatio,
+    selectedImageSize,
     promptUpdateKey,
     triggerGenerate,
     
@@ -214,6 +240,8 @@ export function usePromptPopulation(
     setSelectedPrompt,
     setSelectedFiles,
     setSelectedImageCount,
+    setSelectedAspectRatio,
+    setSelectedImageSize,
     setTriggerGenerate,
     
     // Actions

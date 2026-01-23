@@ -10,7 +10,7 @@ interface ImageSizeSelectorProps {
 // 配置：尺寸选项及其图标和标签
 export const imageSizeConfig: Record<ImageSize, { icon: any; label: string; description: string }> = {
   '2K': { icon: Maximize2, label: '2K', description: '标准' },
-  '4K': { icon: Maximize, label: '4K', description: '高清' },
+  '4K': { icon: Maximize, label: '4K', description: '高清(计2张)' },
 };
 
 export default function ImageSizeSelector({
@@ -24,13 +24,13 @@ export default function ImageSizeSelector({
 
   return (
     <div
-      className="absolute bottom-full right-0 mb-3 bg-white rounded-xl shadow-xl border border-gray-100 p-3 w-[180px] z-50 animate-in fade-in zoom-in-95 duration-200"
+      className="bg-white rounded-xl shadow-xl border border-gray-100 p-2 w-[200px] animate-in fade-in zoom-in-95 duration-200"
       onClick={handleClick}
     >
-      <div className="flex items-center justify-between mb-2 px-1">
+      <div className="flex items-center gap-1.5 px-1 mb-1.5">
         <span className="text-xs font-bold text-gray-500">图片尺寸</span>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="flex flex-col gap-1">
         {(Object.keys(imageSizeConfig) as ImageSize[]).map((size) => {
           const config = imageSizeConfig[size];
           const Icon = config.icon;
@@ -40,17 +40,17 @@ export default function ImageSizeSelector({
               key={size}
               onClick={() => onChange(size)}
               disabled={disabled}
-              className={`flex flex-col items-center justify-center gap-1 p-2.5 rounded-lg transition-all border ${
+              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all border ${
                 isActive
                   ? 'bg-red-50 border-red-500 text-red-600 shadow-sm'
                   : 'bg-gray-50 hover:bg-gray-100 border-transparent text-gray-600'
               } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.5px]' : ''}`} />
+              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'stroke-[2.5px]' : ''}`} />
               <span className={`text-xs font-medium ${isActive ? 'font-bold' : ''}`}>
                 {config.label}
               </span>
-              <span className="text-[9px] text-gray-400">{config.description}</span>
+              <span className="text-[10px] text-gray-400 ml-auto">{config.description}</span>
             </button>
           );
         })}

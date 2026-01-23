@@ -1,7 +1,7 @@
 {
-  "versionCode": "202601221400",
+  "versionCode": "202601231000",
   "versionName": "1.0.6",
-  "updateContent": "支持4k图片生成，倍率为2k图片的1.8倍\n修复部分生不出来图片的问题",
+  "updateContent": "调整分辨率选择的位置\n修复新用户生不出来图片的问题",
   "windowsUrl": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus.zip",
   "macX64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-x64.zip",
   "macArm64Url": "https://sigma-focus.oss-cn-hangzhou.aliyuncs.com/Focus-x64.zip"

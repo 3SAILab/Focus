@@ -239,7 +239,7 @@ func setupCleanupHandler() {
 
 // autoMigrateDatabase 自动迁移数据库
 // 1. 添加 image_deleted 列（如果不存在）
-// 2. 恢复所有被软删除的记录
+// 2. 恢复所有被软删除的记录（仅对旧数据库有效）
 func autoMigrateDatabase() error {
 	// 1. 检查 image_deleted 列是否存在
 	var columnExists bool
@@ -257,19 +257,29 @@ func autoMigrateDatabase() error {
 		log.Println("  ✓ 已添加 image_deleted 列")
 	}
 
-	// 3. 检查是否有被软删除的记录
+	// 3. 检查 deleted_at 列是否存在（仅对旧数据库有效）
+	var deletedAtExists bool
+	config.DB.Raw("SELECT COUNT(*) FROM pragma_table_info('generation_histories') WHERE name='deleted_at'").Scan(&deletedAtExists)
+
+	// 如果 deleted_at 列不存在，说明是新数据库，不需要迁移
+	if !deletedAtExists {
+		log.Println("  ✓ 数据库已是最新版本（无需迁移）")
+		return nil
+	}
+
+	// 4. 检查是否有被软删除的记录
 	var deletedCount int64
 	config.DB.Raw("SELECT COUNT(*) FROM generation_histories WHERE deleted_at IS NOT NULL").Scan(&deletedCount)
 
 	if deletedCount > 0 {
 		log.Printf("  发现 %d 条被软删除的记录，正在恢复...", deletedCount)
 
-		// 4. 将被软删除的记录标记为 image_deleted = true
+		// 5. 将被软删除的记录标记为 image_deleted = true
 		if err := config.DB.Exec("UPDATE generation_histories SET image_deleted = 1 WHERE deleted_at IS NOT NULL").Error; err != nil {
 			return fmt.Errorf("标记已删除记录失败: %w", err)
 		}
 
-		// 5. 恢复记录（将 deleted_at 设置为 NULL）
+		// 6. 恢复记录（将 deleted_at 设置为 NULL）
 		if err := config.DB.Exec("UPDATE generation_histories SET deleted_at = NULL WHERE deleted_at IS NOT NULL").Error; err != nil {
 			return fmt.Errorf("恢复记录失败: %w", err)
 		}

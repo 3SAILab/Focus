@@ -195,10 +195,13 @@ export interface SSEStartEvent {
   count: number;
   prompt: string;
   ref_images: string[];
+  aspect_ratio: string;
+  image_size: string;
 }
 
 export interface SSEImageEvent {
   type: 'image';
+  batch_id: string;  // 添加 batch_id 字段用于多批次支持
   index: number;
   image_url?: string;
   error?: string;
@@ -292,7 +295,7 @@ export const api = {
           method: 'POST',
           body: formData,
         },
-        300000 // 5 分钟超时
+        180000 // 3 分钟超时（上传图片时需要更多时间处理）
       );
       
       const duration = Date.now() - startTime;
@@ -305,10 +308,14 @@ export const api = {
     }
   },
 
-  // 获取历史记录（支持分页）
-  async getHistory(page: number = 1, pageSize: number = 20): Promise<Response> {
+  // 获取历史记录（支持分页和类型筛选）
+  async getHistory(page: number = 1, pageSize: number = 20, type?: string): Promise<Response> {
     const baseUrl = await getCachedApiUrl();
-    return fetch(`${baseUrl}/history?page=${page}&page_size=${pageSize}`, {
+    let url = `${baseUrl}/history?page=${page}&page_size=${pageSize}`;
+    if (type) {
+      url += `&type=${encodeURIComponent(type)}`;
+    }
+    return fetch(url, {
       method: 'GET',
     });
   },

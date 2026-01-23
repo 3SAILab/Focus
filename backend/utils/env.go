@@ -17,19 +17,19 @@ func GetEnvOrDefault(key, defaultValue string) string {
 }
 
 // GetBaseURL 获取基础 URL（用于生成图片和参考图的访问路径）
-// 注意：port 参数已废弃，现在使用 config.ActualPort
+// 优先级：BASE_URL 环境变量 > ACTUAL_PORT > config.ActualPort > 传入的 port 参数
 func GetBaseURL(port string) string {
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL != "" {
 		return baseURL
 	}
-	
-	// 优先使用实际运行端口
+
+	// 优先使用实际运行端口（环境变量）
 	actualPort := os.Getenv("ACTUAL_PORT")
 	if actualPort != "" {
 		return fmt.Sprintf("http://localhost:%s", actualPort)
 	}
-	
+
 	// 回退到传入的端口
 	return fmt.Sprintf("http://localhost:%s", port)
 }
@@ -42,19 +42,19 @@ func ToRelativePath(url string) string {
 	if url == "" {
 		return ""
 	}
-	
+
 	// 如果已经是相对路径（不以 http 开头），直接返回
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return url
 	}
-	
+
 	// 使用正则匹配 http(s)://host:port/路径 或 http(s)://host/路径
 	re := regexp.MustCompile(`^https?://[^/]+/(.+)$`)
 	matches := re.FindStringSubmatch(url)
 	if len(matches) >= 2 {
 		return matches[1]
 	}
-	
+
 	return url
 }
 
@@ -65,9 +65,9 @@ func ToAbsoluteURL(path string, port string) string {
 	if path == "" {
 		return ""
 	}
-	
+
 	baseURL := GetBaseURL(port)
-	
+
 	// 如果已经是完整 URL，先转换为相对路径，再用当前 baseURL 重新拼接
 	// 这样可以确保协议（http/https）和端口都是正确的
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
@@ -79,7 +79,7 @@ func ToAbsoluteURL(path string, port string) string {
 		// 无法提取相对路径，返回原始 URL
 		return path
 	}
-	
+
 	// 相对路径，拼接 baseURL
 	return fmt.Sprintf("%s/%s", baseURL, path)
 }
@@ -91,13 +91,13 @@ func ConvertRefImagesJSON(refImagesJSON string, port string, toRelative bool) st
 	if refImagesJSON == "" || refImagesJSON == "null" || refImagesJSON == "[]" {
 		return refImagesJSON
 	}
-	
+
 	var urls []string
 	if err := json.Unmarshal([]byte(refImagesJSON), &urls); err != nil {
 		// 如果解析失败，可能是单个 URL 字符串
 		return refImagesJSON
 	}
-	
+
 	convertedURLs := make([]string, len(urls))
 	for i, url := range urls {
 		if toRelative {
@@ -106,7 +106,7 @@ func ConvertRefImagesJSON(refImagesJSON string, port string, toRelative bool) st
 			convertedURLs[i] = ToAbsoluteURL(url, port)
 		}
 	}
-	
+
 	result, _ := json.Marshal(convertedURLs)
 	return string(result)
 }

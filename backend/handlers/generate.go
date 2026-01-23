@@ -54,6 +54,7 @@ func GenerateHandler(c *gin.Context) {
 	if imageSize == "" {
 		imageSize = "2K"
 	}
+	utils.LogAPI("接收到的 imageSize 参数: %s", imageSize)
 
 	// 获取生成类型，默认为创作空间
 	generationType := c.PostForm("type")
@@ -97,12 +98,19 @@ func GenerateHandler(c *gin.Context) {
 			}
 			parts = append(parts, types.Part{InlineData: &types.InlineData{MimeType: mimeType, Data: base64Str}})
 
+			// 优化：在后台保存文件，不阻塞主流程
 			refFileName := fmt.Sprintf("ref_%d_%s", time.Now().UnixNano(), file.Filename)
-			refFilePath := filepath.Join(config.UploadDir, refFileName)
-			if err := c.SaveUploadedFile(file, refFilePath); err == nil {
-				// 存储相对路径，读取时动态拼接当前端口
-				savedRefImages = append(savedRefImages, fmt.Sprintf("uploads/%s", refFileName))
-			}
+			savedRefImages = append(savedRefImages, fmt.Sprintf("uploads/%s", refFileName))
+
+			// 复制文件字节，在后台保存（避免在 goroutine 中使用 gin.Context）
+			fileBytesCopy := make([]byte, len(fileBytes))
+			copy(fileBytesCopy, fileBytes)
+			go func(data []byte, fileName string) {
+				refFilePath := filepath.Join(config.UploadDir, fileName)
+				if err := os.WriteFile(refFilePath, data, 0644); err != nil {
+					utils.LogAPI("保存参考图失败: %v", err)
+				}
+			}(fileBytesCopy, refFileName)
 		}
 	}
 
@@ -291,7 +299,7 @@ func callAIAPI(apiURL, currentToken string, payloadBytes []byte, taskID string) 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
 
-	client := &http.Client{Timeout: 840 * time.Second}
+	client := &http.Client{Timeout: 900 * time.Second} // 15 分钟超时，给 AI API 足够的处理时间
 	requestStartTime := time.Now()
 	utils.LogAPI("开始 AI API 请求 (任务 %s, URL: %s)...", taskID, apiURL)
 
@@ -420,6 +428,7 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 		AspectRatio: aspectRatio,
 		ImageSize:   imageSize,
 	}
+	utils.LogAPI("[单图生成] 构建 ImageConfig: AspectRatio=%s, ImageSize=%s", aspectRatio, imageSize)
 
 	payloadObj := types.AIRequest{
 		Contents: []types.Content{{Role: "user", Parts: parts}},
@@ -446,22 +455,32 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 
 		// 保存历史记录
 		newRecord := models.GenerationHistory{
-			Prompt:    prompt,
-			ImageURL:  result.ImageURL,
-			FileName:  extractFileName(result.ImageURL),
-			RefImages: string(refImagesJSON),
-			Type:      generationType,
+			Prompt:      prompt,
+			ImageURL:    result.ImageURL,
+			FileName:    extractFileName(result.ImageURL),
+			RefImages:   string(refImagesJSON),
+			Type:        generationType,
+			AspectRatio: aspectRatio,
+			ImageSize:   imageSize,
 		}
 		config.DB.Create(&newRecord)
 
 		// 增加生成计数
+		// 4K 图片计为 2 张，2K 图片计为 1 张
 		var stats models.GenerationStats
 		dbResult := config.DB.First(&stats)
+
+		// 根据图片尺寸计算增加的数量
+		incrementCount := 1
+		if imageSize == "4K" {
+			incrementCount = 2
+		}
+
 		if dbResult.Error != nil {
-			stats = models.GenerationStats{TotalCount: 1}
+			stats = models.GenerationStats{TotalCount: incrementCount}
 			config.DB.Create(&stats)
 		} else {
-			stats.TotalCount++
+			stats.TotalCount += incrementCount
 			config.DB.Save(&stats)
 		}
 
@@ -500,12 +519,14 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 
 	// 发送初始事件，告知前端批次信息
 	initialData := gin.H{
-		"type":       "start",
-		"task_id":    taskID,
-		"batch_id":   batchID,
-		"count":      count,
-		"prompt":     prompt,
-		"ref_images": absoluteRefImages,
+		"type":         "start",
+		"task_id":      taskID,
+		"batch_id":     batchID,
+		"count":        count,
+		"prompt":       prompt,
+		"ref_images":   absoluteRefImages,
+		"aspect_ratio": aspectRatio,
+		"image_size":   imageSize,
 	}
 	initialJSON, _ := json.Marshal(initialData)
 	c.SSEvent("message", string(initialJSON))
@@ -541,25 +562,35 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 				batchIndex := index
 				batchTotal := count
 				newRecord := models.GenerationHistory{
-					Prompt:     prompt,
-					ImageURL:   result.ImageURL,
-					FileName:   extractFileName(result.ImageURL),
-					RefImages:  string(refImagesJSON),
-					Type:       generationType,
-					BatchID:    &batchID,
-					BatchIndex: &batchIndex,
-					BatchTotal: &batchTotal,
+					Prompt:      prompt,
+					ImageURL:    result.ImageURL,
+					FileName:    extractFileName(result.ImageURL),
+					RefImages:   string(refImagesJSON),
+					Type:        generationType,
+					AspectRatio: aspectRatio,
+					ImageSize:   imageSize,
+					BatchID:     &batchID,
+					BatchIndex:  &batchIndex,
+					BatchTotal:  &batchTotal,
 				}
 				config.DB.Create(&newRecord)
 
 				// 增加生成计数
+				// 4K 图片计为 2 张，2K 图片计为 1 张
 				var stats models.GenerationStats
 				dbResult := config.DB.First(&stats)
+
+				// 根据图片尺寸计算增加的数量
+				incrementCount := 1
+				if imageSize == "4K" {
+					incrementCount = 2
+				}
+
 				if dbResult.Error != nil {
-					stats = models.GenerationStats{TotalCount: 1}
+					stats = models.GenerationStats{TotalCount: incrementCount}
 					config.DB.Create(&stats)
 				} else {
-					stats.TotalCount++
+					stats.TotalCount += incrementCount
 					config.DB.Save(&stats)
 				}
 			}
@@ -584,6 +615,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 		if result.Error != "" {
 			eventData = gin.H{
 				"type":      "image",
+				"batch_id":  batchID,
 				"index":     result.Index,
 				"error":     result.Error,
 				"completed": completedCount,
@@ -594,6 +626,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 			absoluteImageURL := utils.ToAbsoluteURL(result.ImageURL, config.ServerPort)
 			eventData = gin.H{
 				"type":      "image",
+				"batch_id":  batchID,
 				"index":     result.Index,
 				"image_url": absoluteImageURL,
 				"completed": completedCount,
@@ -699,6 +732,7 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 		AspectRatio: aspectRatio,
 		ImageSize:   imageSize,
 	}
+	utils.LogAPI("[多图生成] 图片 %d - 构建 ImageConfig: AspectRatio=%s, ImageSize=%s", index+1, aspectRatio, imageSize)
 
 	payloadObj := types.AIRequest{
 		Contents: []types.Content{{Role: "user", Parts: parts}},
@@ -731,7 +765,7 @@ func callAIAPIInternal(apiURL, currentToken string, payloadBytes []byte, index i
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
 
-	client := &http.Client{Timeout: 840 * time.Second}
+	client := &http.Client{Timeout: 900 * time.Second} // 15 分钟超时，给 AI API 足够的处理时间
 
 	utils.LogAPI("开始 AI API 请求 (图片 %d, URL: %s)...", index+1, apiURL)
 	requestStartTime := time.Now()

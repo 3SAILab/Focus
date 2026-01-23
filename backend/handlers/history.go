@@ -23,6 +23,16 @@ func convertHistoryToResponse(history []models.GenerationHistory) []models.Gener
 		imageURL := utils.ToAbsoluteURL(h.ImageURL, config.ServerPort)
 		refImages := utils.ConvertRefImagesJSON(h.RefImages, config.ServerPort, false)
 
+		// 兼容旧数据：如果没有 aspect_ratio 或 image_size，使用默认值
+		aspectRatio := h.AspectRatio
+		if aspectRatio == "" {
+			aspectRatio = "1:1"
+		}
+		imageSize := h.ImageSize
+		if imageSize == "" {
+			imageSize = "2K"
+		}
+
 		response[i] = models.GenerationHistoryResponse{
 			ID:             h.ID,
 			Prompt:         h.Prompt,
@@ -32,6 +42,8 @@ func convertHistoryToResponse(history []models.GenerationHistory) []models.Gener
 			RefImages:      refImages,
 			Type:           h.Type,
 			ImageDeleted:   h.ImageDeleted,
+			AspectRatio:    aspectRatio,
+			ImageSize:      imageSize,
 			CreatedAt:      h.CreatedAt,
 			UpdatedAt:      h.UpdatedAt,
 			BatchID:        h.BatchID,
@@ -61,13 +73,16 @@ func parsePageParams(c *gin.Context) (int, int) {
 }
 
 // HistoryHandler 获取历史记录处理函数
-// 只返回成功生成的记录（有 image_url 的），不包含失败记录
+// 只返回成功生成的记录（有 image_url 的），不包含失败记录和已删除的图片
 func HistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
-	// 明确过滤掉被软删除的记录（deleted_at IS NULL）
+	// 只过滤有效的图片记录
+	// 注意：不再使用 deleted_at 字段，因为新版本已移除软删除功能
+	// 使用 image_deleted 字段来标记图片是否已被删除
+	// 过滤条件：有图片URL + 图片未被删除
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("image_url != '' AND image_url IS NOT NULL").
-		Where("deleted_at IS NULL") // 明确排除被软删除的记录
+		Where("image_deleted = ? OR image_deleted IS NULL", false)
 
 	dateStr := c.Query("date")
 	if dateStr != "" {
@@ -102,12 +117,13 @@ func HistoryHandler(c *gin.Context) {
 }
 
 // WhiteBackgroundHistoryHandler 获取白底图历史记录
-// 只返回成功生成的记录
+// 只返回成功生成的记录，不包含已删除的图片
 func WhiteBackgroundHistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("type = ?", models.GenerationTypeWhiteBackground).
-		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
+		Where("image_url != '' AND image_url IS NOT NULL").
+		Where("image_deleted = ? OR image_deleted IS NULL", false)
 
 	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
@@ -126,12 +142,13 @@ func WhiteBackgroundHistoryHandler(c *gin.Context) {
 }
 
 // ClothingChangeHistoryHandler 获取换装历史记录
-// 只返回成功生成的记录
+// 只返回成功生成的记录，不包含已删除的图片
 func ClothingChangeHistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("type = ?", models.GenerationTypeClothingChange).
-		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
+		Where("image_url != '' AND image_url IS NOT NULL").
+		Where("image_deleted = ? OR image_deleted IS NULL", false)
 
 	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
@@ -150,12 +167,13 @@ func ClothingChangeHistoryHandler(c *gin.Context) {
 }
 
 // ProductSceneHistoryHandler 获取一键商品图历史记录
-// 只返回成功生成的记录
+// 只返回成功生成的记录，不包含已删除的图片
 func ProductSceneHistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("type = ?", models.GenerationTypeProductScene).
-		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
+		Where("image_url != '' AND image_url IS NOT NULL").
+		Where("image_deleted = ? OR image_deleted IS NULL", false)
 
 	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize
@@ -174,12 +192,13 @@ func ProductSceneHistoryHandler(c *gin.Context) {
 }
 
 // LightShadowHistoryHandler 获取光影融合历史记录
-// 只返回成功生成的记录
+// 只返回成功生成的记录，不包含已删除的图片
 func LightShadowHistoryHandler(c *gin.Context) {
 	var history []models.GenerationHistory
 	query := config.DB.Model(&models.GenerationHistory{}).
 		Where("type = ?", models.GenerationTypeLightShadow).
-		Where("image_url != '' AND image_url IS NOT NULL") // 只返回成功的记录
+		Where("image_url != '' AND image_url IS NOT NULL").
+		Where("image_deleted = ? OR image_deleted IS NULL", false)
 
 	page, pageSize := parsePageParams(c)
 	offset := (page - 1) * pageSize

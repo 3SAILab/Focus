@@ -63,7 +63,7 @@ export interface UseGroupedHistoryParams {
   batchResults: BatchResult[];
   processingTasks: GenerationTask[];
   pendingTasks: PendingTask[];
-  streamingBatch: BatchResult | null;
+  streamingBatches: Map<string, BatchResult>;  // 改为 Map 支持多批次
 }
 
 /**
@@ -82,7 +82,7 @@ export function useGroupedHistory(params: UseGroupedHistoryParams): HistoryDispl
     batchResults,
     processingTasks,
     pendingTasks,
-    streamingBatch,
+    streamingBatches,
   } = params;
 
   return useMemo((): HistoryDisplayItem[] => {
@@ -188,17 +188,17 @@ export function useGroupedHistory(params: UseGroupedHistoryParams): HistoryDispl
     }
     
     // 添加当前会话的待处理任务
-    // 修复：不再根据 streamingBatch 是否存在来决定是否显示 pendingTasks
+    // 修复：不再根据 streamingBatches 是否存在来决定是否显示 pendingTasks
     // 而是根据每个 pendingTask 是否已经有对应的 batchId（SSE 模式）来决定
-    // 如果 pendingTask 有 batchId 且等于 streamingBatch.batchId，说明它已经在 streamingBatch 中显示了，跳过
+    // 如果 pendingTask 有 batchId 且在 streamingBatches 中，说明它已经在 streamingBatch 中显示了，跳过
     for (const task of pendingTasks) {
       // 如果这个 pendingTask 已经有 taskId，且该 taskId 在 processingTasks 中，则跳过
       if (task.taskId && processingTaskIds.has(task.taskId)) {
         continue;
       }
-      // 如果这个 pendingTask 已经有 batchId，且该 batchId 等于当前 streamingBatch 的 batchId，则跳过
+      // 如果这个 pendingTask 已经有 batchId，且该 batchId 在 streamingBatches 中，则跳过
       // 因为它已经在 streamingBatch 中显示了
-      if (task.batchId && streamingBatch && task.batchId === streamingBatch.batchId) {
+      if (task.batchId && streamingBatches.has(task.batchId)) {
         continue;
       }
       result.push({
@@ -210,17 +210,17 @@ export function useGroupedHistory(params: UseGroupedHistoryParams): HistoryDispl
     }
     
     // 添加当前正在流式生成的批次（SSE 模式）
-    // 将 streamingBatch 加入到排序列表中，而不是单独渲染在最后
-    if (streamingBatch) {
+    // 将所有 streamingBatches 加入到排序列表中
+    streamingBatches.forEach((batch) => {
       result.push({
         type: 'streaming',
-        batchId: streamingBatch.batchId,
-        prompt: streamingBatch.prompt,
-        timestamp: streamingBatch.timestamp,
-        refImages: streamingBatch.refImages,
-        sessionBatch: streamingBatch, // 复用 sessionBatch 字段存储 streamingBatch
+        batchId: batch.batchId,
+        prompt: batch.prompt,
+        timestamp: batch.timestamp,
+        refImages: batch.refImages,
+        sessionBatch: batch, // 复用 sessionBatch 字段存储 streamingBatch
       });
-    }
+    });
     
     // 按时间戳排序（统一转换为数字比较）
     // Requirements: 3.3 - 按时间戳升序排列
@@ -231,5 +231,5 @@ export function useGroupedHistory(params: UseGroupedHistoryParams): HistoryDispl
     });
     
     return result;
-  }, [history, failedGenerations, batchResults, processingTasks, pendingTasks, streamingBatch]);
+  }, [history, failedGenerations, batchResults, processingTasks, pendingTasks, streamingBatches]);
 }

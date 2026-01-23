@@ -109,13 +109,10 @@ export default function Create() {
   // 加载历史记录
   const loadHistory = useCallback(async () => {
     try {
-      const response = await api.getHistory(1, PAGE_SIZE);
+      const response = await api.getHistory(1, PAGE_SIZE, GenerationType.CREATE);
       if (response.ok) {
         const data: GenerationHistory[] = await response.json();
-        const filteredData = data.filter(
-          (item) => !item.type || item.type === GenerationType.CREATE
-        );
-        setHistory(filteredData);
+        setHistory(data);
         setCurrentPage(1);
         setHasMore(data.length >= PAGE_SIZE);
         // 只清空成功的批次，保留失败的批次（失败的不会保存到历史记录）
@@ -171,15 +168,12 @@ export default function Create() {
     
     try {
       const nextPage = currentPage + 1;
-      const response = await api.getHistory(nextPage, PAGE_SIZE);
+      const response = await api.getHistory(nextPage, PAGE_SIZE, GenerationType.CREATE);
       if (response.ok) {
         const data: GenerationHistory[] = await response.json();
-        const filteredData = data.filter(
-          (item) => !item.type || item.type === GenerationType.CREATE
-        );
         
-        if (filteredData.length > 0) {
-          setHistory(prev => [...prev, ...filteredData]);
+        if (data.length > 0) {
+          setHistory(prev => [...prev, ...data]);
           setCurrentPage(nextPage);
         }
         setHasMore(data.length >= PAGE_SIZE);
@@ -263,28 +257,52 @@ export default function Create() {
       
       console.log('[Create] Checking', pendingTasks.length, 'pending tasks for completion');
       
+      const now = Date.now();
+      const PENDING_TIMEOUT = 300000; // 5 分钟超时（增加到 5 分钟，避免误报）
+      const PENDING_WARNING_TIME = 120000; // 2 分钟警告时间
+      
       // 方向1：检查所有 pendingTasks 是否完成或失败
       pendingTasks.forEach(pending => {
-        if (!pending.taskId) {
-          console.log('[Create] Pending task', pending.id, 'has no taskId yet');
+        // 检查是否超时（超过 5 分钟还没有 taskId）
+        if (!pending.taskId && !pending.batchId) {
+          const elapsed = now - pending.timestamp;
+          
+          // 超过 2 分钟显示友好提示（只显示一次）
+          if (elapsed > PENDING_WARNING_TIME && elapsed < PENDING_WARNING_TIME + 1000) {
+            console.log('[Create] Pending task', pending.id, 'taking longer than expected, elapsed:', elapsed, 'ms');
+            toast.info('图片处理时间较长，请耐心等待...');
+          }
+          
+          // 超过 5 分钟才真正超时
+          if (elapsed > PENDING_TIMEOUT) {
+            console.warn('[Create] Pending task', pending.id, 'timeout after', elapsed, 'ms');
+            // 超时，清理任务但不显示错误（后端可能还在处理）
+            setPendingTasks(prev => prev.filter(p => p.id !== pending.id));
+            setIsGenerating(false);
+            // 显示友好提示而不是错误
+            toast.info('处理时间较长，结果将在完成后自动显示');
+            return;
+          }
           return; // 跳过还没有 taskId 的任务
         }
         
         // 检查完成的任务
-        const completedTask = getCompletedTask(pending.taskId);
-        if (completedTask) {
-          console.log('[Create] Detected completed task from GlobalTaskContext:', pending.taskId);
-          handleTaskComplete(completedTask);
-          clearCompletedTask(pending.taskId);
-          return;
-        }
-        
-        // 检查失败的任务
-        const failedTask = getFailedTask(pending.taskId);
-        if (failedTask) {
-          console.log('[Create] Detected failed task from GlobalTaskContext:', pending.taskId);
-          handleTaskFailed(failedTask);
-          clearFailedTask(pending.taskId);
+        if (pending.taskId) {
+          const completedTask = getCompletedTask(pending.taskId);
+          if (completedTask) {
+            console.log('[Create] Detected completed task from GlobalTaskContext:', pending.taskId);
+            handleTaskComplete(completedTask);
+            clearCompletedTask(pending.taskId);
+            return;
+          }
+          
+          // 检查失败的任务
+          const failedTask = getFailedTask(pending.taskId);
+          if (failedTask) {
+            console.log('[Create] Detected failed task from GlobalTaskContext:', pending.taskId);
+            handleTaskFailed(failedTask);
+            clearFailedTask(pending.taskId);
+          }
         }
       });
     }, 500);
@@ -297,11 +315,15 @@ export default function Create() {
     selectedPrompt,
     selectedFiles,
     selectedImageCount,
+    selectedAspectRatio,
+    selectedImageSize,
     promptUpdateKey,
     triggerGenerate,
     setSelectedPrompt,
     setSelectedFiles,
     setSelectedImageCount,
+    setSelectedAspectRatio,
+    setSelectedImageSize,
     setTriggerGenerate,
     populatePromptBar,
     handleRegenerate,
@@ -312,7 +334,7 @@ export default function Create() {
 
   // Use useSSEGeneration hook - Requirements: 6.1
   const {
-    streamingBatch,
+    streamingBatches,
     handleSSEStart,
     handleSSEImage,
     handleSSEComplete,
@@ -334,10 +356,13 @@ export default function Create() {
     onQuotaError: () => setShowQuotaError(true),
   });
 
-  // 监控 streamingBatch 状态变化
+  // 监控 streamingBatches 状态变化
   useEffect(() => {
-    console.log('[Create] streamingBatch 状态变化:', streamingBatch ? `存在 (batchId: ${streamingBatch.batchId})` : 'null');
-  }, [streamingBatch]);
+    console.log('[Create] streamingBatches 状态变化，批次数量:', streamingBatches.size);
+    if (streamingBatches.size > 0) {
+      console.log('[Create] 当前批次 IDs:', Array.from(streamingBatches.keys()));
+    }
+  }, [streamingBatches]);
 
   // Use useDeleteConfirmation hook - Requirements: 7.1
   const {
@@ -363,11 +388,11 @@ export default function Create() {
     batchResults,
     processingTasks,
     pendingTasks,
-    streamingBatch,
+    streamingBatches,
   });
 
   // 计算任务运行状态
-  const isTaskRunning = isGenerating || !!currentTaskId || processingTasks.length > 0 || !!streamingBatch;
+  const isTaskRunning = isGenerating || !!currentTaskId || processingTasks.length > 0 || streamingBatches.size > 0;
 
   useEffect(() => {
     loadHistory();
@@ -405,31 +430,31 @@ export default function Create() {
   const prevBatchResultsLengthRef = useRef(batchResults.length);
   const prevFailedGenerationsLengthRef = useRef(failedGenerations.length);
   const prevPendingTasksLengthRef = useRef(pendingTasks.length);
-  const prevStreamingBatchRef = useRef<BatchResult | null>(streamingBatch);
+  const prevStreamingBatchesSizeRef = useRef(streamingBatches.size);
   
   useEffect(() => {
     if (isInitialLoadRef.current) {
       prevBatchResultsLengthRef.current = batchResults.length;
       prevFailedGenerationsLengthRef.current = failedGenerations.length;
       prevPendingTasksLengthRef.current = pendingTasks.length;
-      prevStreamingBatchRef.current = streamingBatch;
+      prevStreamingBatchesSizeRef.current = streamingBatches.size;
       return;
     }
     
     const hasBatchResultsAdded = batchResults.length > prevBatchResultsLengthRef.current;
     const hasFailedGenerationsAdded = failedGenerations.length > prevFailedGenerationsLengthRef.current;
     const hasPendingTasksAdded = pendingTasks.length > prevPendingTasksLengthRef.current;
-    const hasStreamingBatchStarted = !prevStreamingBatchRef.current && streamingBatch !== null;
+    const hasStreamingBatchStarted = streamingBatches.size > prevStreamingBatchesSizeRef.current;
     
     prevBatchResultsLengthRef.current = batchResults.length;
     prevFailedGenerationsLengthRef.current = failedGenerations.length;
     prevPendingTasksLengthRef.current = pendingTasks.length;
-    prevStreamingBatchRef.current = streamingBatch;
+    prevStreamingBatchesSizeRef.current = streamingBatches.size;
     
     if (hasBatchResultsAdded || hasFailedGenerationsAdded || hasPendingTasksAdded || hasStreamingBatchStarted) {
       setTimeout(scrollToBottom, 100);
     }
-  }, [batchResults.length, failedGenerations.length, pendingTasks.length, streamingBatch, scrollToBottom]);
+  }, [batchResults.length, failedGenerations.length, pendingTasks.length, streamingBatches.size, scrollToBottom]);
 
   // 处理单图生成完成
   const handleGenerate = async (response: GenerateResponse, tempId?: string) => {
@@ -509,17 +534,18 @@ export default function Create() {
     const { message, isQuotaError } = getErrorMessage(error);
     console.log('[Create] Parsed error:', { message, isQuotaError });
     
-    // 如果是多图生成且有 streamingBatch，使用 handleSSEError 保留已成功的图片
-    if (count > 1 && streamingBatch) {
-      console.log('[Create] Using handleSSEError for multi-image with streamingBatch');
+    // 如果是多图生成且有 streamingBatches，使用 handleSSEError 保留已成功的图片
+    if (count > 1 && streamingBatches.size > 0) {
+      console.log('[Create] Using handleSSEError for multi-image with streamingBatches');
       // 先移除 pendingTask
       if (tempId) {
         removePendingTask({ tempId });
       }
+      // 不指定 batchId，处理所有批次
       handleSSEError(message);
     } else {
-      // 单图或没有 streamingBatch 的情况
-      console.log('[Create] Creating failed batch/record, streamingBatch:', !!streamingBatch);
+      // 单图或没有 streamingBatches 的情况
+      console.log('[Create] Creating failed batch/record, streamingBatches size:', streamingBatches.size);
       setIsGenerating(false);
       setCurrentTaskId(null);
       
@@ -835,6 +861,8 @@ export default function Create() {
         initialPrompt={selectedPrompt}
         initialFiles={selectedFiles}
         initialImageCount={selectedImageCount}
+        initialAspectRatio={selectedAspectRatio}
+        initialImageSize={selectedImageSize}
         onFilesChange={setSelectedFiles} 
         onPreviewImage={setLightboxImage}
         triggerGenerate={triggerGenerate}
@@ -843,6 +871,8 @@ export default function Create() {
           setSelectedPrompt('');
           setSelectedFiles([]);
           setSelectedImageCount(1);
+          setSelectedAspectRatio('1:1');
+          setSelectedImageSize('2K');
         }}
         onSSEStart={handleSSEStart}
         onSSEImage={handleSSEImage}

@@ -21,6 +21,8 @@ export interface GenerationHistory {
   type?: GenerationTypeValue; // 生成类型
   error_msg?: string;  // 错误信息（失败时）
   image_deleted?: boolean; // 图片是否已被删除
+  aspect_ratio?: string; // 图片比例
+  image_size?: string;   // 图片尺寸
   created_at: string;
   updated_at?: string;
   // 多图生成批次信息

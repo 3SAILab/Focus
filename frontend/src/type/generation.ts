@@ -120,6 +120,8 @@ export interface BatchResult {
   timestamp: number;
   imageCount: number;
   refImages?: string[];
+  aspectRatio?: string;
+  imageSize?: string;
   status: 'streaming' | 'completed' | 'failed';
 }
 
@@ -132,9 +134,11 @@ export function createBatchResult(params: {
   imageCount: number;
   images?: Array<{ url?: string; error?: string; isLoading?: boolean }>;
   refImages?: string[];
+  aspectRatio?: string;
+  imageSize?: string;
   status: 'streaming' | 'completed' | 'failed';
 }): BatchResult {
-  const { batchId, prompt, imageCount, images, refImages, status } = params;
+  const { batchId, prompt, imageCount, images, refImages, aspectRatio, imageSize, status } = params;
   const count = Math.max(1, imageCount);
   
   let resultImages: ImageGridItem[];
@@ -193,6 +197,8 @@ export function createBatchResult(params: {
     timestamp: Date.now(),
     imageCount: count,
     refImages,
+    aspectRatio,
+    imageSize,
     status,
   };
 }

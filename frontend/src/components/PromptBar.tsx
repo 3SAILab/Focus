@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowRight, Loader2, Settings, Upload, Grid2X2, Maximize2 } from 'lucide-react';
+import { ArrowRight, Loader2, Upload, Grid2X2, Settings } from 'lucide-react';
 import ImageUpload from './ImageUpload';
-import AspectRatioSelector, { aspectRatiosConfig } from './AspectRatioSelector';
 import CountSelector from './CountSelector';
-import ImageSizeSelector from './ImageSizeSelector';
+import ImageSettingsSelector from './ImageSettingsSelector';
 import type { AspectRatio, GenerateResponse, GenerateMultiResponse, ImageCount, ImageSize, GenerationTypeValue } from '../type';
 import { GenerationType } from '../type';
 import type { SSEStartEvent, SSEImageEvent, SSECompleteEvent } from '../api';
@@ -24,6 +23,8 @@ interface PromptBarProps {
   initialPrompt?: string;
   initialFiles?: File[];
   initialImageCount?: ImageCount; // 新增：初始图片数量（用于重新生成时保留原数量）
+  initialAspectRatio?: AspectRatio; // 新增：初始比例（用于重新生成时保留原比例）
+  initialImageSize?: ImageSize; // 新增：初始尺寸（用于重新生成时保留原尺寸）
   onFilesChange?: (files: File[]) => void; // 新增：用于父子组件文件状态同步
   triggerGenerate?: boolean;
   onTriggered?: () => void;
@@ -50,6 +51,8 @@ export default function PromptBar({
   initialPrompt = '',
   initialFiles = [],
   initialImageCount = 1,
+  initialAspectRatio = '1:1',
+  initialImageSize = '2K',
   onFilesChange,
   triggerGenerate = false,
   onTriggered,
@@ -72,20 +75,17 @@ export default function PromptBar({
   const isDisabled = disabled;
   const [prompt, setPrompt] = useState(initialPrompt);
   const [files, setFiles] = useState<File[]>(initialFiles);
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
-  const [imageSize, setImageSize] = useState<ImageSize>('2K');
-  const [showAspectSelector, setShowAspectSelector] = useState(false);
-  const [showSizeSelector, setShowSizeSelector] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(initialAspectRatio);
+  const [imageSize, setImageSize] = useState<ImageSize>(initialImageSize);
+  const [showSettingsSelector, setShowSettingsSelector] = useState(false); // 合并的设置选择器
   const [isDragging, setIsDragging] = useState(false); // 拖拽状态
-  const [imageCount, setImageCount] = useState<ImageCount>(1); // 生成数量状态
+  const [imageCount, setImageCount] = useState<ImageCount>(initialImageCount); // 生成数量状态
   const [showCountSelector, setShowCountSelector] = useState(false); // 数量选择器显示状态
   const [isSending, setIsSending] = useState(false); // 正在发送请求（用于按钮 loading 状态）
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const aspectSelectorRef = useRef<HTMLDivElement>(null);
+  const settingsSelectorRef = useRef<HTMLDivElement>(null);
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
-  const sizeSelectorRef = useRef<HTMLDivElement>(null);
-  const sizeBtnRef = useRef<HTMLButtonElement>(null);
   const countSelectorRef = useRef<HTMLDivElement>(null);
   const countBtnRef = useRef<HTMLButtonElement>(null);
   
@@ -113,6 +113,18 @@ export default function PromptBar({
     setImageCount(initialImageCount);
   }, [initialImageCount, promptVersion]);
 
+  // 当 initialAspectRatio 或 promptVersion 变化时更新 aspectRatio
+  useEffect(() => {
+    console.log('[PromptBar] initialAspectRatio 或 promptVersion 变化:', { initialAspectRatio, promptVersion });
+    setAspectRatio(initialAspectRatio);
+  }, [initialAspectRatio, promptVersion]);
+
+  // 当 initialImageSize 或 promptVersion 变化时更新 imageSize
+  useEffect(() => {
+    console.log('[PromptBar] initialImageSize 或 promptVersion 变化:', { initialImageSize, promptVersion });
+    setImageSize(initialImageSize);
+  }, [initialImageSize, promptVersion]);
+
   // 统一更新文件的辅助函数（同时更新内部状态和通知父组件）
   const updateFiles = (newFiles: File[]) => {
     setFiles(newFiles);
@@ -121,28 +133,16 @@ export default function PromptBar({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      // 处理比例选择器
+      // 处理设置选择器（比例+尺寸）
       if (settingsBtnRef.current && settingsBtnRef.current.contains(event.target as Node)) {
         return;
       }
       if (
-        showAspectSelector &&
-        aspectSelectorRef.current &&
-        !aspectSelectorRef.current.contains(event.target as Node)
+        showSettingsSelector &&
+        settingsSelectorRef.current &&
+        !settingsSelectorRef.current.contains(event.target as Node)
       ) {
-        setShowAspectSelector(false);
-      }
-      
-      // 处理尺寸选择器
-      if (sizeBtnRef.current && sizeBtnRef.current.contains(event.target as Node)) {
-        return;
-      }
-      if (
-        showSizeSelector &&
-        sizeSelectorRef.current &&
-        !sizeSelectorRef.current.contains(event.target as Node)
-      ) {
-        setShowSizeSelector(false);
+        setShowSettingsSelector(false);
       }
       
       // 处理数量选择器
@@ -159,7 +159,7 @@ export default function PromptBar({
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showAspectSelector, showSizeSelector, showCountSelector]);
+  }, [showSettingsSelector, showCountSelector]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -312,6 +312,7 @@ export default function PromptBar({
     const currentFiles = [...files];
     const currentImageCount = imageCount;
     const currentAspectRatio = aspectRatio;
+    const currentImageSize = imageSize;
 
     // 立即清空输入框，让用户可以编辑下一个任务
     setPrompt('');
@@ -321,24 +322,29 @@ export default function PromptBar({
     // 修复：通知父组件开始生成，并获取 tempId
     // tempId 用于在整个异步生命周期中精确关联请求和响应
     const tempId = onGenerateStart?.(currentPrompt, currentImageCount);
+    console.log('[PromptBar] Generated tempId:', tempId);
 
     try {
+      console.log('[PromptBar] Building FormData...');
       const formData = new FormData();
       formData.append('prompt', currentPrompt || ' ');
       formData.append('aspectRatio', currentAspectRatio);
-      formData.append('imageSize', imageSize);
+      formData.append('imageSize', currentImageSize);
       formData.append('count', String(currentImageCount));
       
       currentFiles.forEach((file) => {
         formData.append('images', file);
       });
+      console.log('[PromptBar] FormData built, count:', currentImageCount);
 
       // 多图生成使用 SSE 流式接口
       if (currentImageCount > 1 && (onSSEStart || onSSEImage || onSSEComplete)) {
+        console.log('[PromptBar] Using SSE mode for multi-image generation');
         // SSE 模式：请求发送后立即重置状态，允许用户继续发送新请求
         isSubmittingRef.current = false;
         setIsSending(false);
         
+        console.log('[PromptBar] Calling api.generateWithSSE...');
         await api.generateWithSSE(formData, {
           onStart: (event) => {
             console.log('[PromptBar] SSE Start:', event);
@@ -368,15 +374,20 @@ export default function PromptBar({
       }
 
       // 单图或无 SSE 回调时，使用传统方式
+      console.log('[PromptBar] Using traditional mode, calling api.generate...');
       const response = await api.generate(formData);
+      console.log('[PromptBar] Received response, status:', response.status);
 
       if (!response.ok) {
+        console.error('[PromptBar] Response not OK:', response.status);
         const errData = await response.json();
         const { message: errorMsg } = getErrorMessage(errData, response.status);
         throw new Error(errorMsg);
       }
 
+      console.log('[PromptBar] Parsing response JSON...');
       const data = await response.json();
+      console.log('[PromptBar] Response data received');
       
       // 调试：打印后端返回的数据结构
       console.log('[PromptBar] Backend response data:', {
@@ -416,7 +427,7 @@ export default function PromptBar({
       isSubmittingRef.current = false;
       setIsSending(false); // 重置发送状态
     }
-  }, [prompt, files, imageCount, aspectRatio, onGenerateStart, onSSEStart, onSSEImage, onSSEComplete, onGenerateMulti, onGenerate, onTaskCreated, onError, toast, registerTask]);
+  }, [prompt, files, imageCount, aspectRatio, imageSize, onGenerateStart, onSSEStart, onSSEImage, onSSEComplete, onGenerateMulti, onGenerate, onTaskCreated, onError, toast, registerTask]);
 
   // 监听外部触发生成（用于"再次生成"功能）
   useEffect(() => {
@@ -449,8 +460,6 @@ export default function PromptBar({
       handleSubmit();
     }
   };
-
-  const CurrentRatioIcon = aspectRatiosConfig[aspectRatio]?.icon || Settings;
 
   // 根据拖拽状态动态调整容器样式
   const containerStyle = isDragging 
@@ -504,31 +513,21 @@ export default function PromptBar({
 
         {/* 右侧：功能按钮区 */}
         <div className="flex flex-col items-center gap-2 pb-1 shrink-0 relative w-[70px]">
-           {showAspectSelector && (
-            <div ref={aspectSelectorRef} className="absolute bottom-[105%] right-0 z-50">
-               <AspectRatioSelector 
-                value={aspectRatio} 
-                onChange={setAspectRatio}
-                onClose={() => setShowAspectSelector(false)} 
-              />
-            </div>
-          )}
-
-          {showSizeSelector && (
-            <div ref={sizeSelectorRef} className="absolute bottom-[105%] right-0 z-50">
-              <ImageSizeSelector
-                value={imageSize}
-                onChange={(size) => {
-                  setImageSize(size);
-                  setShowSizeSelector(false);
-                }}
+          {/* 合并的设置选择器（比例+尺寸） */}
+          {showSettingsSelector && (
+            <div ref={settingsSelectorRef} className="absolute bottom-full right-0 mb-2 z-50">
+              <ImageSettingsSelector
+                aspectRatio={aspectRatio}
+                imageSize={imageSize}
+                onAspectRatioChange={setAspectRatio}
+                onImageSizeChange={setImageSize}
                 disabled={isDisabled}
               />
             </div>
           )}
 
           {showCountSelector && (
-            <div ref={countSelectorRef} className="absolute bottom-[105%] right-0 z-50">
+            <div ref={countSelectorRef} className="absolute bottom-full right-0 mb-2 z-50">
               <CountSelector
                 value={imageCount}
                 onChange={(count) => {
@@ -540,48 +539,29 @@ export default function PromptBar({
             </div>
           )}
 
+          {/* 合并的设置按钮（比例+尺寸） */}
           <button
             ref={settingsBtnRef}
             onClick={() => {
-              setShowAspectSelector(!showAspectSelector);
-              setShowSizeSelector(false);
-              setShowCountSelector(false); // 关闭数量选择器
-            }}
-            className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all border text-xs font-medium w-full ${
-              aspectRatio !== '1:1' || showAspectSelector
-                ? 'bg-red-50 text-red-600 border-red-100' 
-                : 'bg-white text-gray-400 border-gray-200 hover:text-gray-600 hover:bg-gray-50'
-            }`}
-            title="选择比例"
-          >
-            <CurrentRatioIcon className={`w-3.5 h-3.5 shrink-0 transition-transform duration-300 ${showAspectSelector ? 'rotate-90' : ''}`} />
-            <span className="truncate">{aspectRatio}</span>
-          </button>
-
-          <button
-            ref={sizeBtnRef}
-            onClick={() => {
-              setShowSizeSelector(!showSizeSelector);
-              setShowAspectSelector(false);
+              setShowSettingsSelector(!showSettingsSelector);
               setShowCountSelector(false);
             }}
-            className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all border text-xs font-medium w-full ${
-              imageSize !== '2K' || showSizeSelector
+            className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1 transition-all border text-xs font-medium w-full ${
+              aspectRatio !== '1:1' || imageSize !== '2K' || showSettingsSelector
                 ? 'bg-red-50 text-red-600 border-red-100' 
                 : 'bg-white text-gray-400 border-gray-200 hover:text-gray-600 hover:bg-gray-50'
             }`}
-            title="选择尺寸"
+            title="图片设置"
           >
-            <Maximize2 className={`w-3.5 h-3.5 shrink-0 transition-transform duration-300 ${showSizeSelector ? 'rotate-90' : ''}`} />
-            <span className="truncate">{imageSize}</span>
+            <Settings className={`w-3.5 h-3.5 shrink-0 transition-transform duration-300 ${showSettingsSelector ? 'rotate-90' : ''}`} />
+            <span className="truncate text-[10px]">{aspectRatio}/{imageSize}</span>
           </button>
 
           <button
             ref={countBtnRef}
             onClick={() => {
               setShowCountSelector(!showCountSelector);
-              setShowAspectSelector(false); // 关闭比例选择器
-              setShowSizeSelector(false);
+              setShowSettingsSelector(false);
             }}
             className={`h-8 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all border text-xs font-medium w-full ${
               imageCount > 1 || showCountSelector
