@@ -120,7 +120,7 @@ export async function downloadImage(url: string): Promise<boolean> {
 
 /**
  * 从 URL 加载图片为 File 对象
- * 支持 HTTP/HTTPS URL 和 base64 data URL
+ * 支持 HTTP/HTTPS URL、base64 data URL 和 blob URL
  */
 export async function loadImageAsFile(url: string): Promise<File | null> {
   try {
@@ -154,12 +154,15 @@ export async function loadImageAsFile(url: string): Promise<File | null> {
       return new File([blob], fileName, { type: mimeType });
     }
     
-    // 处理普通 HTTP/HTTPS URL
-    console.log('[loadImageAsFile] 加载 HTTP 图片:', url);
+    // 处理普通 HTTP/HTTPS URL 和 blob URL
+    console.log('[loadImageAsFile] 加载图片:', url);
     const response = await fetch(url);
     const blob = await response.blob();
-    const fileName = url.split('/').pop() || 'ref_image.jpg';
-    console.log('[loadImageAsFile] HTTP 图片加载成功:', fileName, blob.size, 'bytes');
+    // 对于 blob URL，使用时间戳生成文件名
+    const fileName = url.startsWith('blob:') 
+      ? `ref_${Date.now()}.${blob.type.split('/')[1] || 'jpg'}`
+      : (url.split('/').pop() || 'ref_image.jpg');
+    console.log('[loadImageAsFile] 图片加载成功:', fileName, blob.size, 'bytes');
     return new File([blob], fileName, { type: blob.type });
   } catch (error) {
     console.error('[loadImageAsFile] 加载图片失败:', error);

@@ -107,13 +107,20 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
    * Requirements: 6.2
    */
   const handleSSEImage = useCallback((event: SSEImageEvent) => {
-    console.log('[useSSEGeneration] SSE Image:', event);
+    console.log('[useSSEGeneration] SSE Image:', {
+      batch_id: event.batch_id,
+      index: event.index,
+      image_url: event.image_url ? '有图片' : '无图片',
+      error: event.error,
+      completed: event.completed,
+      total: event.total,
+    });
     
     // 使用 event.batch_id 直接定位批次
     setStreamingBatches(prev => {
       const batch = prev.get(event.batch_id);
       if (!batch) {
-        console.warn('[useSSEGeneration] 未找到批次:', event.batch_id);
+        console.warn('[useSSEGeneration] 未找到批次:', event.batch_id, '当前批次:', Array.from(prev.keys()));
         return prev;
       }
       
@@ -133,6 +140,13 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
         index: event.index,
       };
       
+      console.log('[useSSEGeneration] 更新图片:', {
+        batch_id: event.batch_id,
+        index: event.index,
+        isLoading: false,
+        hasUrl: !!event.image_url,
+      });
+      
       const newMap = new Map(prev);
       newMap.set(event.batch_id, { ...batch, images: newImages });
       
@@ -149,6 +163,10 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
     console.log('[useSSEGeneration] ========== SSE Complete 开始处理 ==========');
     console.log('[useSSEGeneration] Event:', event);
     console.log('[useSSEGeneration] tempId:', tempId);
+
+    // 等待一小段时间，确保最后一张图片的 handleSSEImage 状态更新已经渲染到 UI
+    // 这解决了"最后一张图片还在显示加载动画，但批次已经完成"的问题
+    await new Promise(resolve => setTimeout(resolve, 150));
 
     // 使用统一的 removePendingTask 函数清除对应的 pendingTask
     if (removePendingTask) {
@@ -177,46 +195,55 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
 
     console.log('[useSSEGeneration] 处理后的图片:', processedImages);
 
-    // 获取当前的 streamingBatch 用于创建最终批次
-    // 使用函数式更新来获取最新状态并清除
-    setStreamingBatches(currentBatches => {
-      const currentBatch = currentBatches.get(event.batch_id);
-      console.log('[useSSEGeneration] setState 回调执行 - 当前 batch:', currentBatch);
-      
-      // 将流式批次移动到完成的批次列表
-      if (currentBatch) {
-        // 根据后端返回的 status 确定批次状态
-        // status: 'success' | 'partial' | 'failed'
-        const batchStatus = event.status === 'failed' ? 'failed' : 'completed';
+    // 使用 Promise 来等待 setState 完成并获取 finalBatch
+    const finalBatch = await new Promise<BatchResult | null>((resolve) => {
+      setStreamingBatches(currentBatches => {
+        const currentBatch = currentBatches.get(event.batch_id);
+        console.log('[useSSEGeneration] setState 回调执行 - 当前 batch:', currentBatch);
         
-        const finalBatch = createBatchResult({
-          batchId: currentBatch.batchId,
-          prompt: currentBatch.prompt,
-          imageCount: event.images.length,
-          images: processedImages,
-          refImages: event.ref_images || currentBatch.refImages || [],
-          aspectRatio: currentBatch.aspectRatio,
-          imageSize: currentBatch.imageSize,
-          status: batchStatus,
-        });
+        let batch: BatchResult | null = null;
         
-        console.log('[useSSEGeneration] 创建最终批次:', finalBatch);
-        console.log('[useSSEGeneration] 调用 onBatchComplete');
-        onBatchComplete(finalBatch);
-        console.log('[useSSEGeneration] onBatchComplete 调用完成');
-      } else {
-        console.warn('[useSSEGeneration] ⚠️ 警告: 未找到批次', event.batch_id);
-      }
-      
-      // 清除该批次的流式状态
-      const newMap = new Map(currentBatches);
-      newMap.delete(event.batch_id);
-      console.log('[useSSEGeneration] ✅ 清除批次', event.batch_id, '剩余批次数:', newMap.size);
-      return newMap;
+        // 将流式批次移动到完成的批次列表
+        if (currentBatch) {
+          // 根据后端返回的 status 确定批次状态
+          // status: 'success' | 'partial' | 'failed'
+          const batchStatus = event.status === 'failed' ? 'failed' : 'completed';
+          
+          batch = createBatchResult({
+            batchId: currentBatch.batchId,
+            prompt: currentBatch.prompt,
+            imageCount: event.images.length,
+            images: processedImages,
+            refImages: event.ref_images || currentBatch.refImages || [],
+            aspectRatio: currentBatch.aspectRatio,
+            imageSize: currentBatch.imageSize,
+            status: batchStatus,
+          });
+          
+          console.log('[useSSEGeneration] 创建最终批次:', batch);
+        } else {
+          console.warn('[useSSEGeneration] ⚠️ 警告: 未找到批次', event.batch_id);
+        }
+        
+        // 清除该批次的流式状态
+        const newMap = new Map(currentBatches);
+        newMap.delete(event.batch_id);
+        console.log('[useSSEGeneration] ✅ 清除批次', event.batch_id, '剩余批次数:', newMap.size);
+        
+        // 在下一个微任务中 resolve，确保 setState 已经完成
+        setTimeout(() => resolve(batch), 0);
+        
+        return newMap;
+      });
     });
 
-    // 等待一个微任务，确保 setState 已经执行
-    await Promise.resolve();
+    // 调用 onBatchComplete
+    if (finalBatch) {
+      console.log('[useSSEGeneration] 调用 onBatchComplete');
+      onBatchComplete(finalBatch);
+      console.log('[useSSEGeneration] onBatchComplete 调用完成');
+    }
+
     console.log('[useSSEGeneration] setState 应该已经执行完成');
 
     // 调用生成完成回调

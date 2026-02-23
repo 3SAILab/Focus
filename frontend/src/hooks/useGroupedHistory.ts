@@ -18,6 +18,11 @@ export interface FailedGeneration {
   prompt: string;
   errorMessage: string;  // 失败记录必须有错误信息
   timestamp: number;
+  // 重试时需要的额外信息
+  refImages?: string[];   // 参考图 URL 列表
+  imageCount?: number;    // 图片数量
+  aspectRatio?: string;   // 图片比例
+  imageSize?: string;     // 图片尺寸
 }
 
 /**
@@ -42,6 +47,8 @@ export interface HistoryDisplayItem {
   prompt: string;
   timestamp: string | number; // 支持字符串（历史）和数字（当前会话）
   refImages?: string | string[];  // 参考图（字符串或数组）
+  aspectRatio?: string;      // 图片比例
+  imageSize?: string;        // 图片尺寸
   // 失败记录专用
   failedRecord?: FailedGeneration;
   // 当前会话批次专用（也用于 streaming 类型）
@@ -139,6 +146,8 @@ export function useGroupedHistory(params: UseGroupedHistoryParams): HistoryDispl
             prompt: batchItems[0].prompt,
             timestamp: batchItems[0].created_at,
             refImages: batchItems[0].ref_images,
+            aspectRatio: batchItems[0].aspect_ratio,
+            imageSize: batchItems[0].image_size,
           });
         }
       } else {

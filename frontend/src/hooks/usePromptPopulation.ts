@@ -97,9 +97,13 @@ export function usePromptPopulation(
     console.log('[usePromptPopulation] populatePromptBar 被调用:', { prompt, refImages, imageCount, aspectRatio, imageSize, autoTrigger });
     
     try {
-      // 1. 加载参考图
+      // 1. 加载参考图（最多 5 张）
       const refFiles = await loadReferenceFiles(refImages);
-      console.log('[usePromptPopulation] 参考图加载完成:', refFiles.length, '个文件');
+      const limitedRefFiles = refFiles.slice(0, 5); // 限制最多 5 张参考图
+      if (refFiles.length > 5) {
+        console.log('[usePromptPopulation] 参考图超过 5 张，已截取前 5 张');
+      }
+      console.log('[usePromptPopulation] 参考图加载完成:', limitedRefFiles.length, '个文件');
       
       // 2. 设置提示词、参考图、图片数量、比例、尺寸
       setPromptUpdateKey(prev => {
@@ -109,8 +113,8 @@ export function usePromptPopulation(
       });
       console.log('[usePromptPopulation] 设置 selectedPrompt:', prompt);
       setSelectedPrompt(prompt);
-      console.log('[usePromptPopulation] 设置 selectedFiles:', refFiles.length, '个文件');
-      setSelectedFiles(refFiles);
+      console.log('[usePromptPopulation] 设置 selectedFiles:', limitedRefFiles.length, '个文件');
+      setSelectedFiles(limitedRefFiles);
       const count = Math.min(Math.max(1, imageCount), 4) as 1 | 2 | 3 | 4;
       console.log('[usePromptPopulation] 设置 selectedImageCount:', count);
       setSelectedImageCount(count);

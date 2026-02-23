@@ -1,17 +1,18 @@
 /**
  * HistoryFailedItem Component
  * 失败记录渲染组件（当前会话的失败记录）
- * Requirements: 2.3
+ * Requirements: 2.3, 3.1, 3.2, 3.3
  */
 
 import { Trash2 } from 'lucide-react';
 import type { FailedGeneration } from '../../hooks/useGroupedHistory';
 import { ErrorCard } from '../feedback/error-card';
+import { ERROR_MESSAGES } from '../../utils/errorHandler';
 
 export interface HistoryFailedItemProps {
   failedRecord: FailedGeneration;
-  onEditPrompt: (prompt: string) => void;
-  onRegenerate: (prompt: string) => void;
+  onEditPrompt: (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => void;
+  onRegenerate: (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => void;
   onDelete: (failedId: string) => void;
 }
 
@@ -21,20 +22,41 @@ export function HistoryFailedItem({
   onRegenerate,
   onDelete,
 }: HistoryFailedItemProps) {
+  // 构建显示文本：如果有参考图或多图，显示额外信息
+  const hasRefImages = failedRecord.refImages && failedRecord.refImages.length > 0;
+  const imageCount = failedRecord.imageCount || 1;
+  const displaySuffix = imageCount > 1 ? ` (${imageCount}张)` : '';
+  
+  // 判断是否是"未返回图片"错误，需要建议用户修改提示词
+  // Requirements: 3.3 - WHEN AI fails to return images, THE System SHALL prominently suggest the user to modify the prompt
+  const suggestEdit = failedRecord.errorMessage === ERROR_MESSAGES.NO_IMAGE_RETURNED;
+  
   return (
     <div key={failedRecord.id} className="flex flex-col w-full fade-in-up mt-8">
       <div className="flex justify-end items-center gap-2 mb-3 px-2">
         {/* 操作按钮 */}
         <div className="flex gap-1">
           <button
-            onClick={() => onEditPrompt(failedRecord.prompt)}
+            onClick={() => onEditPrompt(
+              failedRecord.prompt,
+              failedRecord.refImages,
+              failedRecord.imageCount,
+              failedRecord.aspectRatio,
+              failedRecord.imageSize
+            )}
             className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
             title="编辑提示词"
           >
             <span className="text-xs">编辑</span>
           </button>
           <button
-            onClick={() => onRegenerate(failedRecord.prompt)}
+            onClick={() => onRegenerate(
+              failedRecord.prompt,
+              failedRecord.refImages,
+              failedRecord.imageCount,
+              failedRecord.aspectRatio,
+              failedRecord.imageSize
+            )}
             className="p-1.5 rounded-lg transition-colors text-gray-400 hover:text-red-500 hover:bg-red-50"
             title="重新生成"
           >
@@ -50,7 +72,7 @@ export function HistoryFailedItem({
         </div>
         {/* 提示词气泡 */}
         <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-2xl rounded-tr-sm text-sm max-w-[70%]">
-          {failedRecord.prompt}
+          {failedRecord.prompt}{displaySuffix}
         </div>
       </div>
       <div className="flex flex-col items-start w-full pl-2">
@@ -64,8 +86,28 @@ export function HistoryFailedItem({
           <ErrorCard
             errorMessage={failedRecord.errorMessage}
             prompt={failedRecord.prompt}
-            onRetry={() => onRegenerate(failedRecord.prompt)}
+            onRetry={() => onRegenerate(
+              failedRecord.prompt,
+              failedRecord.refImages,
+              failedRecord.imageCount,
+              failedRecord.aspectRatio,
+              failedRecord.imageSize
+            )}
+            onEdit={() => onEditPrompt(
+              failedRecord.prompt,
+              failedRecord.refImages,
+              failedRecord.imageCount,
+              failedRecord.aspectRatio,
+              failedRecord.imageSize
+            )}
+            suggestEdit={suggestEdit}
           />
+          {/* 显示参考图信息提示 */}
+          {hasRefImages && (
+            <div className="mt-2 text-xs text-gray-400">
+              包含 {failedRecord.refImages!.length} 张参考图
+            </div>
+          )}
         </div>
       </div>
     </div>

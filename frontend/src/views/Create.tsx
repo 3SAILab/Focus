@@ -8,7 +8,7 @@ import PromptBar from '../components/PromptBar';
 import { PageHeader } from '../components/common';
 import { QuotaErrorHandler } from '../components/feedback';
 import { AlertDialog } from '../components/ui/alert-dialog';
-import type { GenerationHistory, GenerationTask, GenerateMultiResponse, GenerateResponse } from '../type';
+import type { GenerationHistory, GenerationTask, GenerateMultiResponse, GenerateResponse, AspectRatio, ImageSize } from '../type';
 import { GenerationType } from '../type';
 import { api } from '../api';
 import { loadImageAsFile } from '../utils';
@@ -106,7 +106,13 @@ export default function Create() {
     ));
   }, []);
 
-  // 加载历史记录
+  // 判断批次是否包含失败的图片（用于决定是否保留在 batchResults 中）
+  // 失败的图片不会保存到后端历史记录，所以需要在前端保留显示
+  const batchHasFailedImages = useCallback((batch: BatchResult): boolean => {
+    return batch.images.some(img => img.error);
+  }, []);
+
+  // 加载历史记录（重置到第一页）
   const loadHistory = useCallback(async () => {
     try {
       const response = await api.getHistory(1, PAGE_SIZE, GenerationType.CREATE);
@@ -115,13 +121,42 @@ export default function Create() {
         setHistory(data);
         setCurrentPage(1);
         setHasMore(data.length >= PAGE_SIZE);
-        // 只清空成功的批次，保留失败的批次（失败的不会保存到历史记录）
-        setBatchResults(prev => prev.filter(batch => batch.status === 'failed'));
+        // 保留包含失败图片的批次（失败的图片不会保存到后端历史记录）
+        setBatchResults(prev => prev.filter(batchHasFailedImages));
       }
     } catch (error) {
       console.error('加载历史记录失败:', error);
     }
-  }, []);
+  }, [batchHasFailedImages]);
+
+  // 刷新历史记录（保持当前分页，只刷新已加载的数据）
+  // 用于 SSE 完成后刷新，不会丢失已加载的更多历史记录
+  const refreshHistory = useCallback(async () => {
+    // 如果正在加载更多，等待加载完成后再刷新
+    if (isLoadingMore) {
+      console.log('[Create] refreshHistory: 正在加载更多，延迟刷新');
+      setTimeout(() => refreshHistory(), 500);
+      return;
+    }
+    
+    try {
+      // 加载当前已加载的所有页数的数据
+      // 使用 history.length 而不是 currentPage * PAGE_SIZE，确保不会丢失数据
+      const totalItems = Math.max(history.length, PAGE_SIZE);
+      console.log('[Create] refreshHistory: 加载', totalItems, '条数据');
+      const response = await api.getHistory(1, totalItems, GenerationType.CREATE);
+      if (response.ok) {
+        const data: GenerationHistory[] = await response.json();
+        setHistory(data);
+        // 不重置 currentPage，保持当前分页状态
+        setHasMore(data.length >= totalItems);
+        // 保留包含失败图片的批次（失败的图片不会保存到后端历史记录）
+        setBatchResults(prev => prev.filter(batchHasFailedImages));
+      }
+    } catch (error) {
+      console.error('刷新历史记录失败:', error);
+    }
+  }, [history.length, batchHasFailedImages, isLoadingMore]);
 
   // 检测不完整批次并自动刷新
   // 当历史记录中有批次图片数量少于 batch_total 时，说明批次还在生成中
@@ -203,11 +238,11 @@ export default function Create() {
     removePendingTask({ taskId: task.task_id });
     setIsGenerating(false);
     setCurrentTaskId(null);
-    // 只清空成功的批次，保留失败的批次
-    setBatchResults(prev => prev.filter(batch => batch.status === 'failed'));
+    // 保留包含失败图片的批次（失败的图片不会保存到后端历史记录）
+    setBatchResults(prev => prev.filter(batchHasFailedImages));
     loadHistory();
     setCounterRefresh(prev => prev + 1);
-  }, [loadHistory, removePendingTask]);
+  }, [loadHistory, removePendingTask, batchHasFailedImages]);
 
   const handleTaskFailed = useCallback((task: GenerationTask) => {
     console.log('[Create] Task failed:', task.task_id, task.error_msg);
@@ -332,6 +367,12 @@ export default function Create() {
     handleEditBatchPromptWithRef,
   } = usePromptPopulation(toast, scrollToBottom);
 
+  // 包装 setSelectedFiles，确保最多 5 张参考图
+  const handleFilesChange = useCallback((files: File[]) => {
+    const limitedFiles = files.slice(0, 5);
+    setSelectedFiles(limitedFiles);
+  }, [setSelectedFiles]);
+
   // Use useSSEGeneration hook - Requirements: 6.1
   const {
     streamingBatches,
@@ -344,7 +385,7 @@ export default function Create() {
       console.log('[Create] onBatchComplete 被调用，添加批次到 batchResults:', batch);
       setBatchResults(prev => [...prev, batch]);
     },
-    loadHistory,
+    loadHistory: refreshHistory, // 使用 refreshHistory 而不是 loadHistory，避免丢失已加载的更多历史记录
     updatePendingTaskBatchId,
     removePendingTask,
     onGenerationComplete: () => {
@@ -526,13 +567,16 @@ export default function Create() {
   };
 
   // 处理生成错误
-  const handleGenerateError = (error: string, prompt?: string, imageCount?: number, tempId?: string) => {
-    console.log('[Create] handleGenerateError called:', { error, prompt, imageCount, tempId });
+  const handleGenerateError = (error: string, prompt?: string, imageCount?: number, tempId?: string, files?: File[], aspectRatio?: string, imageSize?: string) => {
+    console.log('[Create] handleGenerateError called:', { error, prompt, imageCount, tempId, filesCount: files?.length, aspectRatio, imageSize });
     const count = imageCount || selectedImageCount;
     console.log('[Create] Resolved count:', count, 'selectedImageCount:', selectedImageCount);
     
     const { message, isQuotaError } = getErrorMessage(error);
     console.log('[Create] Parsed error:', { message, isQuotaError });
+    
+    // 将 File[] 转换为 Object URL 用于重试
+    const refImageUrls = files?.map(file => URL.createObjectURL(file)) || [];
     
     // 如果是多图生成且有 streamingBatches，使用 handleSSEError 保留已成功的图片
     if (count > 1 && streamingBatches.size > 0) {
@@ -556,6 +600,9 @@ export default function Create() {
           prompt: prompt || currentPrompt || '未知提示词',
           imageCount: count,
           images: [{ error: message }],
+          refImages: refImageUrls,
+          aspectRatio: aspectRatio || selectedAspectRatio,
+          imageSize: imageSize || selectedImageSize,
           status: 'failed',
         });
         console.log('[Create] Created failedBatch:', failedBatch);
@@ -575,6 +622,10 @@ export default function Create() {
           prompt: prompt || currentPrompt || '未知提示词',
           errorMessage: message,
           timestamp: Date.now(),
+          refImages: refImageUrls,
+          imageCount: count,
+          aspectRatio: aspectRatio || selectedAspectRatio,
+          imageSize: imageSize || selectedImageSize,
         };
         console.log('[Create] Created failedRecord:', failedRecord);
         // 先添加失败记录，再移除 pendingTask
@@ -628,12 +679,19 @@ export default function Create() {
   // 引用图片
   const handleUseAsReference = async (imageUrl: string) => {
     try {
+      // 检查是否已达到 5 张限制
+      if (selectedFiles.length >= 5) {
+        toast.error('最多支持上传 5 张参考图');
+        return;
+      }
+      
       const file = await loadImageAsFile(imageUrl);
       if (file) {
         // Note: setSelectedFiles from usePromptPopulation accepts File[] directly
-        // We need to append to existing files
+        // We need to append to existing files (limit enforced above)
         const newFiles = [...selectedFiles, file];
         setSelectedFiles(newFiles);
+        toast.success('已添加为参考图');
         setTimeout(() => scrollToBottom(), 100);
       } else {
         toast.error('加载图片失败，请稍后重试');
@@ -645,51 +703,64 @@ export default function Create() {
   };
 
   // 重试失败的生成（用于 HistorySingleItem）
-  const handleRetry = useCallback(async (prompt: string) => {
-    console.log('[Create] handleRetry 被调用，prompt:', prompt);
+  const handleRetry = useCallback(async (item: GenerationHistory) => {
+    console.log('[Create] handleRetry 被调用，item:', item);
     await populatePromptBar({
-      prompt,
-      imageCount: 1,
+      prompt: item.prompt || '',
+      refImages: item.ref_images,
+      imageCount: item.batch_total || 1,
+      aspectRatio: (item.aspect_ratio as AspectRatio) || '1:1',
+      imageSize: (item.image_size as ImageSize) || '2K',
       autoTrigger: true,
     });
   }, [populatePromptBar]);
 
   // 编辑失败记录的提示词
-  const handleEditFailedPrompt = useCallback(async (prompt: string) => {
-    console.log('[Create] handleEditFailedPrompt 被调用，prompt:', prompt);
+  const handleEditFailedPrompt = useCallback(async (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => {
+    console.log('[Create] handleEditFailedPrompt 被调用，prompt:', prompt, 'refImages:', refImages?.length);
     await populatePromptBar({
       prompt,
-      imageCount: 1,
+      refImages,
+      imageCount: imageCount || 1,
+      aspectRatio: (aspectRatio as AspectRatio) || '1:1',
+      imageSize: (imageSize as ImageSize) || '2K',
       autoTrigger: false,
     });
   }, [populatePromptBar]);
 
   // 重新生成失败记录
-  const handleRegenerateFailedPrompt = useCallback(async (prompt: string) => {
-    console.log('[Create] handleRegenerateFailedPrompt 被调用，prompt:', prompt);
+  const handleRegenerateFailedPrompt = useCallback(async (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => {
+    console.log('[Create] handleRegenerateFailedPrompt 被调用，prompt:', prompt, 'refImages:', refImages?.length);
     await populatePromptBar({
       prompt,
-      imageCount: 1,
+      refImages,
+      imageCount: imageCount || 1,
+      aspectRatio: (aspectRatio as AspectRatio) || '1:1',
+      imageSize: (imageSize as ImageSize) || '2K',
       autoTrigger: true,
     });
   }, [populatePromptBar]);
 
   // 批次重新生成（用于 HistoryBatchItem）
-  const handleBatchRegenerate = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number) => {
+  const handleBatchRegenerate = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => {
     await populatePromptBar({
       prompt,
       refImages,
       imageCount: imageCount || 1,
+      aspectRatio: (aspectRatio as AspectRatio) || '1:1',
+      imageSize: (imageSize as ImageSize) || '2K',
       autoTrigger: true,
     });
   }, [populatePromptBar]);
 
   // 批次编辑提示词（用于 HistoryBatchItem）
-  const handleBatchEditPrompt = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number) => {
+  const handleBatchEditPrompt = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => {
     await populatePromptBar({
       prompt,
       refImages,
       imageCount: imageCount || 1,
+      aspectRatio: (aspectRatio as AspectRatio) || '1:1',
+      imageSize: (imageSize as ImageSize) || '2K',
       autoTrigger: false,
     });
   }, [populatePromptBar]);
@@ -863,7 +934,7 @@ export default function Create() {
         initialImageCount={selectedImageCount}
         initialAspectRatio={selectedAspectRatio}
         initialImageSize={selectedImageSize}
-        onFilesChange={setSelectedFiles} 
+        onFilesChange={handleFilesChange} 
         onPreviewImage={setLightboxImage}
         triggerGenerate={triggerGenerate}
         onTriggered={() => {

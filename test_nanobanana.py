@@ -1,103 +1,273 @@
-import asyncio
-import aiohttp
-import json
-import time
-import os
-import sys
-from datetime import datetime
+# """
+# Aiaimi (aiaicc) API Key 验证工具
+# 用于验证 API Key 有效性并获取额度信息
+# """
+# import requests
+# import urllib3
+# import os
+
+# # 禁用 SSL 警告
+# urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# # --- 配置区域 ---
+# AIAIMI_BASE_URL = "https://aiaimi.cc"
+# AIAIMI_USER = "3"
+# AIAIMI_AUTH_KEY = "wHZXM5oncgJnmDOwvG8BijXunBXM"
+
+# # 代理配置（如果需要的话，设置为 None 表示不使用代理）
+# # 例如: "http://127.0.0.1:7890" 或 "socks5://127.0.0.1:1080"
+# PROXY = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY") or None
+
+
+# def validate_aiaimi_key(api_key: str, use_proxy: bool = True) -> dict:
+#     """
+#     验证 Aiaimi 平台的 API Key
+    
+#     Args:
+#         api_key: 要验证的 API Key
+#         use_proxy: 是否使用代理
+        
+#     Returns:
+#         dict: 包含验证结果的字典
+#     """
+#     url = f"{AIAIMI_BASE_URL}/api/token/search?keyword=&token={api_key}"
+    
+#     headers = {
+#         "New-Api-User": AIAIMI_USER,
+#         "Authorization": AIAIMI_AUTH_KEY,
+#     }
+    
+#     # 代理设置
+#     proxies = None
+#     if use_proxy and PROXY:
+#         proxies = {"http": PROXY, "https": PROXY}
+#         print(f"[INFO] 使用代理: {PROXY}")
+    
+#     try:
+#         response = requests.get(
+#             url, 
+#             headers=headers, 
+#             verify=False, 
+#             timeout=30,
+#             proxies=proxies
+#         )
+        
+#         print(f"[DEBUG] HTTP Status: {response.status_code}")
+        
+#         if response.status_code != 200:
+#             return {
+#                 "valid": False,
+#                 "error": f"HTTP 错误: {response.status_code}"
+#             }
+        
+#         # 尝试解析 JSON
+#         try:
+#             result = response.json()
+#         except Exception as e:
+#             print(f"[DEBUG] Response Text: {response.text[:500]}")
+#             return {
+#                 "valid": False,
+#                 "error": f"JSON 解析失败: {e}"
+#             }
+        
+#         if not result.get("success"):
+#             return {
+#                 "valid": False,
+#                 "error": f"API 返回失败: {result.get('message', '未知')}"
+#             }
+        
+#         data_list = result.get("data", [])
+#         if not data_list:
+#             return {
+#                 "valid": False,
+#                 "error": "未找到令牌数据"
+#             }
+        
+#         info = data_list[0]
+        
+#         # 获取原始额度
+#         remain_quota = info.get("remain_quota", 0)
+#         used_quota = info.get("used_quota", 0)
+        
+#         # Aiaimi 额度计算公式
+#         remain_sheets = (remain_quota / 500000.0) / 1.5
+#         used_sheets = (used_quota / 500000.0) / 1.5
+        
+#         name = info.get("name", "未命名")
+        
+#         return {
+#             "valid": True,
+#             "name": name,
+#             "remain": round(remain_sheets, 2),
+#             "used": round(used_sheets, 2),
+#             "remain_quota": remain_quota,
+#             "used_quota": used_quota,
+#         }
+        
+#     except requests.exceptions.Timeout:
+#         return {"valid": False, "error": "请求超时，可能需要配置代理"}
+#     except requests.exceptions.RequestException as e:
+#         return {"valid": False, "error": f"网络错误: {e}"}
+#     except Exception as e:
+#         return {"valid": False, "error": f"未知错误: {e}"}
+
+
+# def main():
+#     print("=" * 50)
+#     print("Aiaimi (aiaicc) API Key 验证工具")
+#     print("=" * 50)
+    
+#     if PROXY:
+#         print(f"当前代理: {PROXY}")
+#     else:
+#         print("未配置代理 (可设置环境变量 HTTPS_PROXY)")
+    
+#     api_key = input("\n请输入要验证的 API Key: ").strip()
+    
+#     if not api_key:
+#         print("❌ API Key 不能为空")
+#         return
+    
+#     print("\n正在验证...")
+#     result = validate_aiaimi_key(api_key)
+    
+#     print("\n" + "-" * 50)
+#     if result["valid"]:
+#         print("✅ API Key 有效!")
+#         print(f"   令牌名称: {result['name']}")
+#         print(f"   剩余额度: {result['remain']} 张")
+#         print(f"   已使用: {result['used']} 张")
+#         print(f"   原始剩余: {result['remain_quota']}")
+#         print(f"   原始已用: {result['used_quota']}")
+#     else:
+#         print(f"❌ API Key 无效: {result.get('error', '未知错误')}")
+#     print("-" * 50)
+
+
+# if __name__ == "__main__":
+#     main()
+
+
+"""
+Aiaimi (aiaicc) API Key 验证工具
+用于验证 API Key 有效性并获取额度信息
+"""
+import requests
+import urllib3
+
+# 禁用 SSL 警告（因为 aiaimi 需要跳过 TLS 验证）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- 配置区域 ---
-API_KEY = os.getenv("VECTOR_ENGINE_KEY", "sk-YIRSJjrtRablveDqg9NrJUtQe6q67g7JvRNUAsifrp6neD0h") 
-API_URL = "https://api.vectorengine.ai/v1beta/models/gemini-3-pro-image-preview:generateContent"
+AIAIMI_BASE_URL = "https://ttest.aiaimi.cc"
+AIAIMI_USER = "3"
+AIAIMI_AUTH_KEY = "wHZXM5oncgJnmDOwvG8BijXunBXM"
 
-# 要测试的 Prompt 列表
-prompts = [
-    "A cute llama standing in a futuristic city, cyberpunk style",
-    # "A fat cat wearing sunglasses on a beach",
-    # "A futuristic robot playing a guitar"
-]
 
-# --- 核心逻辑 ---
-
-def save_json_response(data, filename):
-    """将 API 响应数据保存为 JSON 文件"""
-    try:
-        # 确保输出目录存在
-        os.makedirs("output", exist_ok=True)
-        file_path = os.path.join("output", filename)
+def validate_aiaimi_key(api_key: str) -> dict:
+    """
+    验证 Aiaimi 平台的 API Key
+    
+    Args:
+        api_key: 要验证的 API Key
         
-        # 写入 JSON 文件，ensure_ascii=False 保证中文正常显示（如果有）
-        with open(file_path, "w", encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        
-        return file_path
-    except Exception as e:
-        print(f"❌ 保存 JSON 失败: {e}")
-        return None
-
-async def send_request(session, prompt, index):
-    """发送请求并保存原始 JSON 响应"""
-    payload = {
-        "contents": [
-            {"role": "user", "parts": [{"text": prompt}]}
-        ],
-        "generationConfig": {
-            "responseModalities": ["IMAGE", "TEXT"], 
-            "imageConfig": {
-                "aspectRatio": "1:1",
-                "imageSize": "2K"
-            }
-        }
-    }
+    Returns:
+        dict: 包含验证结果的字典
+            - valid: bool, 是否有效
+            - name: str, 令牌名称
+            - remain: float, 剩余额度（张数）
+            - used: float, 已使用额度（张数）
+            - remain_quota: float, 原始剩余额度
+            - used_quota: float, 原始已使用额度
+            - error: str, 错误信息（如果有）
+    """
+    url = f"{AIAIMI_BASE_URL}/api/token/search?keyword=&token={api_key}"
     
     headers = {
-        'Authorization': f'Bearer {API_KEY}',
-        'Content-Type': 'application/json'
+        "New-Api-User": AIAIMI_USER,
+        "Authorization": AIAIMI_AUTH_KEY,
     }
-
-    start_time = time.time()
+    
     try:
-        async with session.post(API_URL, json=payload, headers=headers) as response:
-            # 获取完整的 JSON 结果
-            result = await response.json()
-            duration = time.time() - start_time
-            
-            # --- 修改点：直接保存 JSON，不处理图片 ---
-            filename = f"response_{index}.json"
-            saved_path = save_json_response(result, filename)
-            
-            if saved_path:
-                print(f"✅ 请求 {index} 完成! JSON 已保存: {saved_path} (耗时: {duration:.2f}s)")
-            else:
-                print(f"⚠️ 请求 {index} 完成，但保存文件失败。")
-
+        # 发送请求，跳过 SSL 验证
+        response = requests.get(url, headers=headers, verify=False, timeout=10)
+        
+        if response.status_code != 200:
+            return {
+                "valid": False,
+                "error": f"HTTP 错误: {response.status_code}"
+            }
+        
+        result = response.json()
+        
+        if not result.get("success"):
+            return {
+                "valid": False,
+                "error": "API 返回失败"
+            }
+        
+        data_list = result.get("data", [])
+        if not data_list:
+            return {
+                "valid": False,
+                "error": "未找到令牌数据"
+            }
+        
+        info = data_list[0]
+        
+        # 获取原始额度
+        remain_quota = info.get("remain_quota", 0)
+        used_quota = info.get("used_quota", 0)
+        
+        # Aiaimi 额度计算公式
+        remain_sheets = (remain_quota / 500000.0) / 1.5
+        used_sheets = (used_quota / 500000.0) / 1.5
+        
+        name = info.get("name", "未命名")
+        
+        return {
+            "valid": True,
+            "name": name,
+            "remain": round(remain_sheets, 2),
+            "used": round(used_sheets, 2),
+            "remain_quota": remain_quota,
+            "used_quota": used_quota,
+        }
+        
+    except requests.exceptions.Timeout:
+        return {"valid": False, "error": "请求超时"}
+    except requests.exceptions.RequestException as e:
+        return {"valid": False, "error": f"网络错误: {e}"}
     except Exception as e:
-        print(f"❌ 网络请求失败 (请求 {index}): {e}")
+        return {"valid": False, "error": f"未知错误: {e}"}
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-        print(f"🚀 开始并发发送 {len(prompts)} 个请求...")
-        
-        for i, prompt in enumerate(prompts):
-            task = send_request(session, prompt, i)
-            tasks.append(task)
-        
-        await asyncio.gather(*tasks)
-        
-        # 等待一小会儿，确保底层连接断开
-        await asyncio.sleep(0.25)
+
+def main():
+    print("=" * 50)
+    print("Aiaimi (aiaicc) API Key 验证工具")
+    print("=" * 50)
+    
+    api_key = input("\n请输入要验证的 API Key: ").strip()
+    
+    if not api_key:
+        print("❌ API Key 不能为空")
+        return
+    
+    print("\n正在验证...")
+    result = validate_aiaimi_key(api_key)
+    
+    print("\n" + "-" * 50)
+    if result["valid"]:
+        print("✅ API Key 有效!")
+        print(f"   令牌名称: {result['name']}")
+        print(f"   剩余额度: {result['remain']} 张")
+        print(f"   已使用: {result['used']} 张")
+        print(f"   原始剩余: {result['remain_quota']}")
+        print(f"   原始已用: {result['used_quota']}")
+    else:
+        print(f"❌ API Key 无效: {result.get('error', '未知错误')}")
+    print("-" * 50)
+
 
 if __name__ == "__main__":
-    # --- Windows 专用修复补丁 ---
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        
-    asyncio.run(main())
-
-    # --- 修改点：最后打印当前时间 ---
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print("-" * 30)
-    print(f"🕒 执行结束时间: {current_time}")
-    print("-" * 30)
-
+    main()

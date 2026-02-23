@@ -19,7 +19,7 @@ export interface HistorySingleItemProps {
   onEditPrompt: (item: GenerationHistory) => void;
   onUseAsReference: (url: string) => void;
   onDelete: (item: GenerationHistory) => void;
-  onRetry: (prompt: string) => void;
+  onRetry: (item: GenerationHistory) => void;
 }
 
 /**
@@ -85,7 +85,7 @@ export function HistorySingleItem({
             <ErrorCard
               errorMessage={getErrorMessage(item.error_msg || '未知错误').message}
               prompt={item.prompt}
-              onRetry={() => onRetry(item.prompt)}
+              onRetry={() => onRetry(item)}
             />
           ) : (
             <ImageCard

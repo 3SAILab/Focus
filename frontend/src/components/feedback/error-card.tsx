@@ -1,13 +1,15 @@
-import { AlertTriangle, RotateCw } from 'lucide-react';
+import { AlertTriangle, RotateCw, Edit3 } from 'lucide-react';
 
 export interface ErrorCardProps {
   errorMessage: string;
   prompt?: string;
   onRetry?: () => void;
+  onEdit?: () => void;      // 重新编辑回调
   disabled?: boolean;
+  suggestEdit?: boolean;    // 是否突出显示编辑建议
 }
 
-export function ErrorCard({ errorMessage, prompt, onRetry, disabled = false }: ErrorCardProps) {
+export function ErrorCard({ errorMessage, prompt, onRetry, onEdit, disabled = false, suggestEdit = false }: ErrorCardProps) {
   return (
     <div className="masonry-card bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
       {/* 错误图标区域 */}
@@ -31,6 +33,24 @@ export function ErrorCard({ errorMessage, prompt, onRetry, disabled = false }: E
           >
             <RotateCw className="w-4 h-4" />
             {disabled ? '请等待...' : '重试'}
+          </button>
+        )}
+        
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            disabled={disabled}
+            className={`mt-2 flex items-center gap-2 px-4 py-2 text-sm rounded-full transition-colors ${
+              disabled 
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                : suggestEdit
+                  ? 'bg-blue-500 text-white hover:bg-blue-600'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+            title={disabled ? '请等待当前任务完成' : '重新编辑'}
+          >
+            <Edit3 className="w-4 h-4" />
+            {disabled ? '请等待...' : '重新编辑'}
           </button>
         )}
       </div>

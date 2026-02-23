@@ -1,5 +1,8 @@
 import { ImagePlus, X, Plus, Layers } from 'lucide-react';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { compressImages, validateTotalSize } from '../utils/imageCompressor';
+import { ERROR_MESSAGES } from '../utils/errorHandler';
+import { useToast } from '../context/ToastContext';
 
 interface ImageUploadProps {
   files: File[];
@@ -19,6 +22,7 @@ export default function ImageUpload({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [isHovered, setIsHovered] = useState(false);
+  const toast = useToast();
   
   // 拖拽状态
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -50,10 +54,48 @@ export default function ImageUpload({
     setMaskIndices(newMaskIndices);
   }, [files, detectMasks]);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const newFiles = Array.from(e.target.files);
-      onFilesChange([...files, ...newFiles]);
+      let newFiles = Array.from(e.target.files);
+      
+      // 计算还能添加多少张图片（最多 5 张）
+      const remainingSlots = 5 - files.length;
+      
+      // 如果已经有 5 张了，直接返回
+      if (remainingSlots <= 0) {
+        toast.error(ERROR_MESSAGES.IMAGE_COUNT_EXCEEDED);
+        e.target.value = '';
+        return;
+      }
+      
+      // 如果选择的图片超过剩余槽位，截断并提示
+      if (newFiles.length > remainingSlots) {
+        toast.warning(`最多支持 5 张参考图，已自动选择前 ${remainingSlots} 张`);
+        newFiles = newFiles.slice(0, remainingSlots);
+      }
+      
+      // 压缩选择的图片
+      const compressResult = await compressImages(newFiles);
+      
+      if (!compressResult.success) {
+        toast.error(compressResult.error || ERROR_MESSAGES.IMAGE_SIZE_EXCEEDED);
+        e.target.value = '';
+        return;
+      }
+      
+      // 计算总大小（包括已有文件和压缩后的新文件）
+      const existingFilesSize = files.reduce((sum, file) => sum + file.size, 0);
+      const totalSize = existingFilesSize + compressResult.totalSize;
+      
+      // 验证压缩后总大小是否超过 25MB
+      if (!validateTotalSize(totalSize)) {
+        toast.error(ERROR_MESSAGES.IMAGE_SIZE_EXCEEDED);
+        e.target.value = '';
+        return;
+      }
+      
+      // 使用压缩后的文件
+      onFilesChange([...files, ...compressResult.files]);
       e.target.value = '';
     }
   };
@@ -220,21 +262,23 @@ export default function ImageUpload({
             );
           })}
 
-          {/* 添加按钮 */}
-          <button
-            onClick={triggerUpload}
-            className={`absolute top-0 w-14 h-20 rounded-xl border-2 border-dashed border-gray-300 text-gray-400 hover:border-red-300 hover:text-red-500 bg-white/80 backdrop-blur-sm flex items-center justify-center transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
-              isHovered 
-                ? 'opacity-100 translate-x-0 rotate-0' 
-                : 'opacity-0 -translate-x-full rotate-45 pointer-events-none'
-            }`}
-            style={{
-              left: `${files.length * STEP}px`,
-              zIndex: 0
-            }}
-          >
-            <Plus className="w-6 h-6" />
-          </button>
+          {/* 添加按钮 - 已有 5 张时隐藏 */}
+          {files.length < 5 && (
+            <button
+              onClick={triggerUpload}
+              className={`absolute top-0 w-14 h-20 rounded-xl border-2 border-dashed border-gray-300 text-gray-400 hover:border-red-300 hover:text-red-500 bg-white/80 backdrop-blur-sm flex items-center justify-center transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
+                isHovered 
+                  ? 'opacity-100 translate-x-0 rotate-0' 
+                  : 'opacity-0 -translate-x-full rotate-45 pointer-events-none'
+              }`}
+              style={{
+                left: `${files.length * STEP}px`,
+                zIndex: 0
+              }}
+            >
+              <Plus className="w-6 h-6" />
+            </button>
+          )}
           
           {/* 图片数量标识 */}
           {!isHovered && files.length > 1 && (

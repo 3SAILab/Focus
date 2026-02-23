@@ -10,6 +10,7 @@ import { api } from '../api';
 import { useToast } from '../context/ToastContext';
 import { useGlobalTask } from '../context/GlobalTaskContext';
 import { getErrorMessage } from '../utils/errorHandler';
+import { compressImages } from '../utils/imageCompressor';
 
 // 防抖间隔（毫秒）- 防止快速双击
 const DEBOUNCE_INTERVAL = 500;
@@ -18,7 +19,7 @@ interface PromptBarProps {
   onGenerate: (response: GenerateResponse, tempId?: string) => void;
   onGenerateMulti?: (response: GenerateMultiResponse, tempId?: string) => void; // 修复：传递 tempId
   onGenerateStart?: (prompt?: string, imageCount?: number) => string; // 修复：返回 tempId
-  onError: (error: string, prompt?: string, imageCount?: number, tempId?: string) => void; // 修复：传递 tempId
+  onError: (error: string, prompt?: string, imageCount?: number, tempId?: string, files?: File[], aspectRatio?: string, imageSize?: string) => void; // 修复：传递完整参数
   onPreviewImage?: (url: string) => void;
   initialPrompt?: string;
   initialFiles?: File[];
@@ -103,7 +104,12 @@ export default function PromptBar({
 
   useEffect(() => {
     console.log('[PromptBar] initialFiles 变化:', initialFiles.length, '个文件');
-    setFiles(initialFiles);
+    // 限制最多 5 张参考图
+    const limitedFiles = initialFiles.slice(0, 5);
+    if (initialFiles.length > 5) {
+      console.log('[PromptBar] 参考图超过 5 张，已截取前 5 张');
+    }
+    setFiles(limitedFiles);
   }, [initialFiles]);
 
   // 当 initialImageCount 或 promptVersion 变化时更新 imageCount
@@ -126,9 +132,11 @@ export default function PromptBar({
   }, [initialImageSize, promptVersion]);
 
   // 统一更新文件的辅助函数（同时更新内部状态和通知父组件）
+  // 限制最多 5 张参考图
   const updateFiles = (newFiles: File[]) => {
-    setFiles(newFiles);
-    onFilesChange?.(newFiles);
+    const limitedFiles = newFiles.slice(0, 5);
+    setFiles(limitedFiles);
+    onFilesChange?.(limitedFiles);
   };
 
   useEffect(() => {
@@ -170,7 +178,7 @@ export default function PromptBar({
   }, [prompt]);
 
   // 处理粘贴图片
-  const handlePaste = (e: React.ClipboardEvent) => {
+  const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData.items;
     const pastedFiles: File[] = [];
     
@@ -183,8 +191,31 @@ export default function PromptBar({
 
     if (pastedFiles.length > 0) {
       e.preventDefault(); // 阻止粘贴二进制数据到文本框
-      updateFiles([...files, ...pastedFiles]);
-      toast.success(`已粘贴 ${pastedFiles.length} 张图片`);
+      
+      // 检查是否会超过 5 张限制
+      const remainingSlots = 5 - files.length;
+      if (remainingSlots <= 0) {
+        toast.error('最多支持上传 5 张参考图');
+        return;
+      }
+      
+      const filesToAdd = pastedFiles.slice(0, remainingSlots);
+      const skippedCount = pastedFiles.length - filesToAdd.length;
+      
+      // 压缩图片
+      const compressResult = await compressImages(filesToAdd);
+      if (!compressResult.success) {
+        toast.error(compressResult.error || '图片处理失败');
+        return;
+      }
+      
+      updateFiles([...files, ...compressResult.files]);
+      
+      if (skippedCount > 0) {
+        toast.warning(`最多支持 5 张参考图，已粘贴 ${filesToAdd.length} 张，跳过 ${skippedCount} 张`);
+      } else {
+        toast.success(`已粘贴 ${filesToAdd.length} 张图片`);
+      }
     }
   };
 
@@ -247,18 +278,51 @@ export default function PromptBar({
     );
 
     if (droppedFiles.length > 0) {
-      updateFiles([...files, ...droppedFiles]);
-      toast.success(`已添加 ${droppedFiles.length} 张图片`);
+      // 检查是否会超过 5 张限制
+      const remainingSlots = 5 - files.length;
+      if (remainingSlots <= 0) {
+        toast.error('最多支持上传 5 张参考图');
+        return;
+      }
+      
+      const filesToAdd = droppedFiles.slice(0, remainingSlots);
+      const skippedCount = droppedFiles.length - filesToAdd.length;
+      
+      // 压缩图片
+      const compressResult = await compressImages(filesToAdd);
+      if (!compressResult.success) {
+        toast.error(compressResult.error || '图片处理失败');
+        return;
+      }
+      
+      updateFiles([...files, ...compressResult.files]);
+      
+      if (skippedCount > 0) {
+        toast.warning(`最多支持 5 张参考图，已添加 ${filesToAdd.length} 张，跳过 ${skippedCount} 张`);
+      } else {
+        toast.success(`已添加 ${filesToAdd.length} 张图片`);
+      }
       return;
     }
 
     // 检查是否是从应用内拖拽的图片 URL
     const sigmaImageUrl = e.dataTransfer.getData('application/x-sigma-image');
     if (sigmaImageUrl) {
+      // 检查是否已达到 5 张限制
+      if (files.length >= 5) {
+        toast.error('最多支持上传 5 张参考图');
+        return;
+      }
       const file = await loadImageFromUrl(sigmaImageUrl);
       if (file) {
-        updateFiles([...files, file]);
-        toast.success('已添加参考图');
+        // 压缩图片
+        const compressResult = await compressImages([file]);
+        if (compressResult.success && compressResult.files.length > 0) {
+          updateFiles([...files, compressResult.files[0]]);
+          toast.success('已添加参考图');
+        } else {
+          toast.error('图片处理失败');
+        }
       } else {
         toast.error('加载图片失败');
       }
@@ -268,10 +332,21 @@ export default function PromptBar({
     // 检查是否是普通的图片 URL
     const imageUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
     if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
+      // 检查是否已达到 5 张限制
+      if (files.length >= 5) {
+        toast.error('最多支持上传 5 张参考图');
+        return;
+      }
       const file = await loadImageFromUrl(imageUrl);
       if (file) {
-        updateFiles([...files, file]);
-        toast.success('已添加参考图');
+        // 压缩图片
+        const compressResult = await compressImages([file]);
+        if (compressResult.success && compressResult.files.length > 0) {
+          updateFiles([...files, compressResult.files[0]]);
+          toast.success('已添加参考图');
+        } else {
+          toast.error('图片处理失败');
+        }
       } else {
         toast.error('加载图片失败');
       }
@@ -366,8 +441,8 @@ export default function PromptBar({
           onError: (error) => {
             console.error('[PromptBar] SSE Error:', error);
             const { message } = getErrorMessage(error.message || error);
-            // 修复：传递 tempId 给父组件，用于精确清除
-            onError(message, currentPrompt, currentImageCount, tempId);
+            // 修复：传递完整参数给父组件，用于精确清除和重试
+            onError(message, currentPrompt, currentImageCount, tempId, currentFiles, currentAspectRatio, currentImageSize);
           },
         });
         return;
@@ -416,13 +491,16 @@ export default function PromptBar({
         // 修复：传递 tempId 给父组件，用于精确关联
         console.log('[PromptBar] 调用 onTaskCreated');
         onTaskCreated?.(data.task_id, tempId);
+      } else if (data.error) {
+        // 后端返回了错误信息（如 AI 未返回图片）
+        throw new Error(data.error);
       } else {
-        throw new Error('后端未返回图片地址');
+        throw new Error('请求成功但未返回图片');
       }
     } catch (error) {
       const { message } = getErrorMessage(error);
-      // 修复：传递 tempId 给父组件，用于精确清除
-      onError(message, currentPrompt, currentImageCount, tempId);
+      // 修复：传递完整参数给父组件，用于精确清除和重试
+      onError(message, currentPrompt, currentImageCount, tempId, currentFiles, currentAspectRatio, currentImageSize);
     } finally {
       isSubmittingRef.current = false;
       setIsSending(false); // 重置发送状态

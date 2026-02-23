@@ -5,23 +5,6 @@
 // 默认后端 URL（本地 HTTP）
 const DEFAULT_BACKEND_URL = 'http://localhost:51888';
 
-// ============ 测试模式开关 ============
-// 设置为 true 可以模拟 API 错误，用于测试 ErrorCard
-// 测试完成后请设置为 false
-const SIMULATE_ERROR = false;
-const SIMULATE_ERROR_CODE = 500; // 可选: 429, 500, 502, 503
-
-// ============ 多图 Mock 模式 ============
-// 设置为 true 可以模拟多图生成响应，用于测试前端 UI
-// 测试完成后请设置为 false
-const MOCK_MULTI_IMAGE = false;
-// 模拟部分失败：设置为 true 时，多图生成中一定会有 1 张失败
-// 失败的图片位置随机
-const MOCK_PARTIAL_FAILURE = false;
-// 模拟延迟（毫秒）：每张图的模拟生成延迟
-const MOCK_DELAY_PER_IMAGE = 500;
-// =====================================
-
 // API 日志功能（始终启用，用于调试）
 const logAPI = (type: 'REQUEST' | 'RESPONSE', method: string, url: string, data?: unknown, duration?: number, status?: number) => {
   const timestamp = new Date().toISOString();
@@ -101,92 +84,6 @@ const fetchWithTimeout = async (
   }
 };
 
-// ============ 多图 Mock 响应类型 ============
-interface MockImageResult {
-  image_url?: string;
-  error?: string;
-}
-
-interface MockMultiImageResponse {
-  images: MockImageResult[];
-  prompt: string;
-  batch_id: string;
-}
-
-// 生成唯一的 batch_id
-const generateBatchId = (): string => {
-  return `batch_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-};
-
-// 生成 Mock 多图响应
-const generateMockMultiImageResponse = async (
-  count: number,
-  prompt: string
-): Promise<MockMultiImageResponse> => {
-  const batchId = generateBatchId();
-  const images: MockImageResult[] = [];
-  
-  // 随机图片尺寸选项（模拟不同比例）
-  const sizes = ['400/400', '400/300', '300/400', '500/400'];
-  
-  // 多图时随机选择一个位置作为失败的图片
-  const failIndex = MOCK_PARTIAL_FAILURE && count > 1 
-    ? Math.floor(Math.random() * count) 
-    : -1;
-  
-  console.log(`[Mock] 多图生成: count=${count}, failIndex=${failIndex}`);
-  
-  for (let i = 0; i < count; i++) {
-    // 模拟每张图的延迟
-    await new Promise(resolve => setTimeout(resolve, MOCK_DELAY_PER_IMAGE));
-    
-    // 模拟部分失败：当启用且是随机选中的失败位置时
-    if (MOCK_PARTIAL_FAILURE && i === failIndex) {
-      images.push({
-        error: '图片生成失败：API 调用超时',
-      });
-      console.log(`[Mock] 图片 ${i + 1}/${count} 模拟失败`);
-    } else {
-      // 使用 picsum.photos 生成随机占位图
-      // 添加随机参数确保每张图不同
-      const size = sizes[i % sizes.length];
-      const randomSeed = Math.floor(Math.random() * 1000);
-      const imageUrl = `https://picsum.photos/seed/${randomSeed}/${size}`;
-      
-      images.push({
-        image_url: imageUrl,
-      });
-      console.log(`[Mock] 图片 ${i + 1}/${count} 生成成功: ${imageUrl}`);
-    }
-  }
-  
-  return {
-    images,
-    prompt,
-    batch_id: batchId,
-  };
-};
-
-// 生成 Mock 单图响应（向后兼容）
-const generateMockSingleImageResponse = async (prompt: string): Promise<{
-  status: string;
-  image_url: string;
-  text: string;
-}> => {
-  await new Promise(resolve => setTimeout(resolve, MOCK_DELAY_PER_IMAGE));
-  
-  const randomSeed = Math.floor(Math.random() * 1000);
-  const imageUrl = `https://picsum.photos/seed/${randomSeed}/400/400`;
-  
-  console.log(`[Mock] 单图生成成功: ${imageUrl}`);
-  
-  return {
-    status: 'success',
-    image_url: imageUrl,
-    text: prompt,
-  };
-};
-
 // SSE 事件类型定义
 export interface SSEStartEvent {
   type: 'start';
@@ -201,7 +98,7 @@ export interface SSEStartEvent {
 
 export interface SSEImageEvent {
   type: 'image';
-  batch_id: string;  // 添加 batch_id 字段用于多批次支持
+  batch_id: string;
   index: number;
   image_url?: string;
   error?: string;
@@ -231,48 +128,8 @@ export interface SSECallbacks {
 }
 
 export const api = {
-  // 生成图片（超时时间 5 分钟）
+  // 生成图片（超时时间 3 分钟）
   async generate(formData: FormData): Promise<Response> {
-    // 测试模式：模拟错误响应
-    if (SIMULATE_ERROR) {
-      console.log('[API] 测试模式：模拟错误响应', SIMULATE_ERROR_CODE);
-      await new Promise(resolve => setTimeout(resolve, 1500)); // 模拟延迟
-      return new Response(JSON.stringify({ 
-        error: '服务器负载异常，不会消耗次数，请重试',
-        status_code: SIMULATE_ERROR_CODE 
-      }), {
-        status: SIMULATE_ERROR_CODE,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    // 多图 Mock 模式
-    if (MOCK_MULTI_IMAGE) {
-      const count = parseInt(formData.get('count') as string) || 1;
-      const prompt = (formData.get('prompt') as string) || '测试提示词';
-      
-      console.log(`[API] 多图 Mock 模式：生成 ${count} 张图片`);
-      console.log(`[API] Mock 配置: 部分失败=${MOCK_PARTIAL_FAILURE}, 延迟=${MOCK_DELAY_PER_IMAGE}ms/张`);
-      
-      if (count === 1) {
-        // 单图模式：返回向后兼容的响应格式
-        const mockResponse = await generateMockSingleImageResponse(prompt);
-        console.log('[API] Mock 单图响应:', mockResponse);
-        return new Response(JSON.stringify(mockResponse), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      } else {
-        // 多图模式：返回新的响应格式
-        const mockResponse = await generateMockMultiImageResponse(count, prompt);
-        console.log('[API] Mock 多图响应:', mockResponse);
-        return new Response(JSON.stringify(mockResponse), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-    }
-
     const baseUrl = await getCachedApiUrl();
     const url = `${baseUrl}/generate`;
     const startTime = Date.now();
@@ -564,10 +421,8 @@ export const api = {
                     callbacks.onImage?.(event);
                     break;
                   case 'complete':
-                    console.log('[SSE] Complete event 收到:', event);
-                    console.log('[SSE] 调用 callbacks.onComplete');
+                    console.log('[SSE] Complete event:', event);
                     callbacks.onComplete?.(event);
-                    console.log('[SSE] callbacks.onComplete 调用完成');
                     break;
                 }
               } catch (e) {

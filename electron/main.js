@@ -13,7 +13,7 @@ const ENABLE_DEV_LOG = true;
 // ============ 生产环境日志开关 ============
 // 设置为 true 启用生产环境日志（用于调试用户问题）
 // 设置为 false 禁用生产环境日志（正常发布时应设为 false）
-const ENABLE_PROD_LOG = false;
+const ENABLE_PROD_LOG = true;
 // =========================================
 
 // ============ 前端 Console 日志开关 ============

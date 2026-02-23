@@ -2,25 +2,42 @@
 
 /**
  * 统一错误消息
- * 三种错误提示：
- * 1. 服务器过载 - 可重试
- * 2. 余额不足 - 需要充值
- * 3. 未返回图片 - 修改提示词
+ * 错误提示类型：
+ * 1. 网络错误 - 可重试
+ * 2. 图片数量超限 - 减少图片
+ * 3. 图片大小超限 - 减少图片或选择较小图片
+ * 4. AI 无图片 - 修改提示词
+ * 5. 余额不足 - 需要充值
+ * 6. 服务器过载 - 可重试（兜底）
  */
-const ERROR_MESSAGES = {
-  SERVER_OVERLOAD: '服务器过载请重试，多次失败请联系销售',
+export const ERROR_MESSAGES = {
+  NETWORK_ERROR: '网络出了点小差，请稍后重试',
+  IMAGE_COUNT_EXCEEDED: '最多支持上传 5 张参考图',
+  IMAGE_SIZE_EXCEEDED: '图片总大小过大，请减少图片数量或选择较小的图片',
+  NO_IMAGE_RETURNED: '未能生成图片，请尝试修改提示词后重试',
   QUOTA_EXHAUSTED: '余额不足请联系销售充值',
-  NO_IMAGE_RETURNED: '请求成功但未返回图片，请修改提示词后重试',
+  SERVER_OVERLOAD: '网络出了点小差，请稍后重试',  // 兜底错误也用网络提示
 };
 
 /**
- * 解析后的错误接口
+ * 用户操作建议
+ */
+export type UserAction = 
+  | 'retry'           // 重试
+  | 'edit_prompt'     // 修改提示词
+  | 'reduce_images'   // 减少图片
+  | 'contact_sales';  // 联系销售
+
+/**
+ * 解析后的错误接口（扩展）
  */
 export interface ParsedError {
   message: string;
   isQuotaError: boolean;
+  isNoImageError: boolean;
   statusCode?: number;
-  userAction: 'contact_sales' | 'retry' | 'modify_prompt';
+  userAction: UserAction;
+  suggestEdit?: boolean;  // 是否建议修改提示词
 }
 
 /**
@@ -59,10 +76,44 @@ const QUOTA_PATTERNS = [
 ];
 
 /**
+ * 网络超时/连接错误检测关键词
+ */
+const NETWORK_ERROR_KEYWORDS = [
+  'timeout',
+  'timed out',
+  'network',
+  'econnrefused',
+  'econnreset',
+  'enotfound',
+  'etimedout',
+  'socket hang up',
+  'connection refused',
+  'connection reset',
+  'network error',
+  '网络',
+  '超时',
+  '连接失败',
+  '连接超时',
+  '请求超时',
+];
+
+/**
+ * 检查是否是网络超时/连接错误
+ */
+export function isNetworkError(error: string): boolean {
+  const lowerError = error.toLowerCase();
+  return NETWORK_ERROR_KEYWORDS.some(keyword => 
+    lowerError.includes(keyword.toLowerCase())
+  );
+}
+
+/**
  * 检查是否是"未返回图片"错误
  */
 export function isNoImageError(error: string): boolean {
-  return error.includes('请求成功但未返回图片') || error.includes('未找到图片数据');
+  return error.includes('请求成功但未返回图片') || 
+         error.includes('未找到图片数据') ||
+         error.includes('未能生成图片');
 }
 
 /**
@@ -86,10 +137,11 @@ export function isQuotaExhaustedError(error: string): boolean {
 
 /**
  * 解析 API 错误信息
- * 统一返回三种错误消息之一：
- * 1. 余额不足 - 需要充值
- * 2. 未返回图片 - 修改提示词
- * 3. 服务器过载 - 可重试
+ * 错误检测顺序：
+ * 1. 余额不足 - 需要充值 (userAction: 'contact_sales')
+ * 2. 未返回图片 - 修改提示词 (userAction: 'edit_prompt', suggestEdit: true)
+ * 3. 网络超时/连接错误 - 可重试 (userAction: 'retry')
+ * 4. 服务器过载 - 可重试（兜底）(userAction: 'retry')
  */
 export function parseApiError(error: unknown, httpStatusCode?: number): ParsedError {
   let rawMessage = '';
@@ -120,24 +172,42 @@ export function parseApiError(error: unknown, httpStatusCode?: number): ParsedEr
   }
   
   // 检查是否是余额不足错误
-  const isQuotaError = isQuotaExhaustedError(rawMessage) || statusCode === 401 || statusCode === 403;
+  const quotaError = isQuotaExhaustedError(rawMessage) || statusCode === 401 || statusCode === 403;
   
-  if (isQuotaError) {
+  if (quotaError) {
     return {
       message: ERROR_MESSAGES.QUOTA_EXHAUSTED,
       isQuotaError: true,
+      isNoImageError: false,
       statusCode,
       userAction: 'contact_sales',
+      suggestEdit: false,
     };
   }
   
   // 检查是否是"未返回图片"错误
-  if (isNoImageError(rawMessage)) {
+  const noImageErr = isNoImageError(rawMessage);
+  if (noImageErr) {
     return {
       message: ERROR_MESSAGES.NO_IMAGE_RETURNED,
       isQuotaError: false,
+      isNoImageError: true,
       statusCode,
-      userAction: 'modify_prompt',
+      userAction: 'edit_prompt',
+      suggestEdit: true,  // AI 未返回图片时建议修改提示词
+    };
+  }
+  
+  // 检查是否是网络超时/连接错误
+  const networkErr = isNetworkError(rawMessage);
+  if (networkErr) {
+    return {
+      message: ERROR_MESSAGES.NETWORK_ERROR,
+      isQuotaError: false,
+      isNoImageError: false,
+      statusCode,
+      userAction: 'retry',
+      suggestEdit: false,
     };
   }
   
@@ -145,8 +215,10 @@ export function parseApiError(error: unknown, httpStatusCode?: number): ParsedEr
   return {
     message: ERROR_MESSAGES.SERVER_OVERLOAD,
     isQuotaError: false,
+    isNoImageError: false,
     statusCode,
     userAction: 'retry',
+    suggestEdit: false,
   };
 }
 
