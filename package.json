@@ -6,11 +6,10 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "cross-env NODE_ENV=development electron .",
-    
     "build": "npm run build:win-x64",
     "build:win-x64": "npm run build:frontend && npm run build:backend:win && npm run validate:build && npm run dist:win-x64",
     "build:sequential": "npm run build:frontend && npm run build:backend:win && npm run validate:build && npm run build:electron",
-    "build:frontend": "cd frontend && set ENABLE_FRONTEND_CONSOLE=true&& npm run build && cd ..",
+    "build:frontend": "cd frontend && set ENABLE_FRONTEND_CONSOLE=false&& npm run build && cd ..",
     "build:frontend:release": "cd frontend && set ENABLE_FRONTEND_CONSOLE=false&& npm run build && cd ..",
     "build:backend:win": "cd backend && set GOARCH=amd64&& go build -trimpath -ldflags=\"-s -w -buildid=\" -o ../dist/backend/sigma-backend.exe . && cd ..",
     "build:backend:mac": "cd backend && GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags=\"-s -w -buildid=\" -o ../dist/backend/sigma-backend . && cd ..",
@@ -66,14 +65,20 @@
       {
         "from": "dist/backend",
         "to": "backend",
-        "filter": ["**/*", "!.env", "!*.env"]
+        "filter": [
+          "**/*",
+          "!.env",
+          "!*.env"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/focus.ico",
@@ -84,7 +89,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "assets/icon.icns",
@@ -98,7 +106,9 @@
       "target": [
         {
           "target": "deb",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/focus.ico",
@@ -119,7 +129,9 @@
       "runAfterFinish": true,
       "include": "build/installer.nsh",
       "language": "2052",
-      "installerLanguages": ["zh_CN"]
+      "installerLanguages": [
+        "zh_CN"
+      ]
     },
     "dmg": {
       "contents": [
@@ -150,9 +162,10 @@
     "email": "support@sigma-ai.com"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
-    "cross-env": "^7.0.3",
+    "fast-check": "^3.23.2",
     "jest": "^29.7.0",
     "rimraf": "^5.0.5"
   },

@@ -57,8 +57,9 @@ const QUOTA_KEYWORDS = [
   '用尽',      // 新增：该令牌额度已用尽
   '额度',      // 新增：该令牌额度已用尽
   'remainquota',
-  'invalid tokens',  // 新增：You have used invalid tokens
+  'invalid token',   // 新增：You have used invalid tokens / Invalid token
   '无效令牌',   // 新增：您多次使用无效令牌
+  '无效的令牌', // 新增：API 返回 message_zh: "无效的令牌"
 ];
 
 /**
@@ -73,6 +74,7 @@ const QUOTA_PATTERNS = [
   /balance\s*(is\s*)?(not\s*enough|insufficient)/i,
   /limit\s*(is\s*)?(exceeded|reached)/i,
   /rate\s*limit/i,
+  /invalid\s+token/i,
 ];
 
 /**

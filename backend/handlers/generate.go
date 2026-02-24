@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ImageResult 单张图片生成结果
@@ -195,6 +196,26 @@ func extractImageURLFromMarkdown(text string) string {
 		return matches[1]
 	}
 	return ""
+}
+
+// incrementGenerationCount 原子增加生成计数，避免并发竞态条件
+// 使用 SQL UPDATE ... SET total_count = total_count + ? 保证原子性
+func incrementGenerationCount(imageSize string) {
+	// 根据图片尺寸计算增加的数量：4K 计为 2 张，2K 计为 1 张
+	incrementCount := 1
+	if imageSize == "4K" {
+		incrementCount = 2
+	}
+
+	// 使用原子 SQL 更新，避免 read-modify-write 竞态
+	result := config.DB.Model(&models.GenerationStats{}).
+		Where("id >= 1").
+		Update("total_count", gorm.Expr("total_count + ?", incrementCount))
+
+	// 如果没有记录被更新（表为空），创建初始记录
+	if result.RowsAffected == 0 {
+		config.DB.Create(&models.GenerationStats{TotalCount: incrementCount})
+	}
 }
 
 // saveBase64Image 保存 base64 图片到本地
@@ -465,24 +486,8 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 		}
 		config.DB.Create(&newRecord)
 
-		// 增加生成计数
-		// 4K 图片计为 2 张，2K 图片计为 1 张
-		var stats models.GenerationStats
-		dbResult := config.DB.First(&stats)
-
-		// 根据图片尺寸计算增加的数量
-		incrementCount := 1
-		if imageSize == "4K" {
-			incrementCount = 2
-		}
-
-		if dbResult.Error != nil {
-			stats = models.GenerationStats{TotalCount: incrementCount}
-			config.DB.Create(&stats)
-		} else {
-			stats.TotalCount += incrementCount
-			config.DB.Save(&stats)
-		}
+		// 增加生成计数（原子操作，避免并发竞态）
+		incrementGenerationCount(imageSize)
 
 		// 更新任务状态为完成
 		task.CompleteTask(finalImageURL)
@@ -575,24 +580,8 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 				}
 				config.DB.Create(&newRecord)
 
-				// 增加生成计数
-				// 4K 图片计为 2 张，2K 图片计为 1 张
-				var stats models.GenerationStats
-				dbResult := config.DB.First(&stats)
-
-				// 根据图片尺寸计算增加的数量
-				incrementCount := 1
-				if imageSize == "4K" {
-					incrementCount = 2
-				}
-
-				if dbResult.Error != nil {
-					stats = models.GenerationStats{TotalCount: incrementCount}
-					config.DB.Create(&stats)
-				} else {
-					stats.TotalCount += incrementCount
-					config.DB.Save(&stats)
-				}
+				// 增加生成计数（原子操作，避免并发竞态）
+				incrementGenerationCount(imageSize)
 			}
 			mu.Unlock()
 
@@ -719,11 +708,13 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 }
 
 // callAIAPIForImage 调用 AI API 生成单张图片
-func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, parts []types.Part, index int) ImageResult {
+func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, parts []types.Part, index int) (result ImageResult) {
 	// 添加 recover 防止 panic 导致静默失败
 	defer func() {
 		if r := recover(); r != nil {
-			utils.LogAPI("图片 %d 生成发生 panic: %v", index+1, r)
+			errMsg := fmt.Sprintf("图片生成发生内部错误: %v", r)
+			utils.LogAPI("图片 %d panic: %v", index+1, r)
+			result = ImageResult{Error: errMsg, Index: index}
 		}
 	}()
 
@@ -750,7 +741,7 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 	utils.LogAPIRequest("POST", apiURL, payloadObj)
 
 	// 调用 API
-	result := callAIAPIInternal(apiURL, currentToken, payloadBytes, index)
+	result = callAIAPIInternal(apiURL, currentToken, payloadBytes, index)
 
 	return result
 }

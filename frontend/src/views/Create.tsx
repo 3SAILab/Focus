@@ -18,12 +18,13 @@ import { getErrorMessage } from '../utils/errorHandler';
 import { useTaskRecovery } from '../hooks/useTaskRecovery';
 
 // Import unified types - Requirements: 1.1, 1.2
-import { createBatchResult, type BatchResult } from '../type/generation';
+import { createBatchResult } from '../type/generation';
 
 // Import extracted hooks - Requirements: 3.1, 4.1, 6.1, 7.1
 import { useGroupedHistory, type FailedGeneration, type PendingTask } from '../hooks/useGroupedHistory';
 import { usePromptPopulation } from '../hooks/usePromptPopulation';
 import { useSSEGeneration } from '../hooks/useSSEGeneration';
+import { useGenerationState } from '../hooks/useGenerationState';
 import { useDeleteConfirmation } from '../hooks/useDeleteConfirmation';
 
 // Import history components - Requirements: 2.1-2.7
@@ -45,18 +46,21 @@ export default function Create() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   
-  // 多任务占位卡片状态
-  const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
+  // 生成状态管理 Hook - Requirements: 5.1, 5.2, 5.3, 5.4, 5.5
+  const {
+    pendingTasks, setPendingTasks,
+    batchResults, setBatchResults,
+    failedGenerations, setFailedGenerations,
+    removePendingTask,
+    updatePendingTaskBatchId,
+    batchHasFailedImages,
+  } = useGenerationState();
   
   const [counterRefresh, setCounterRefresh] = useState(0);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showQuotaError, setShowQuotaError] = useState(false);
   const [showContact, setShowContact] = useState(false);
-  const [failedGenerations, setFailedGenerations] = useState<FailedGeneration[]>([]);
   const [currentPrompt, setCurrentPrompt] = useState('');
-
-  // 多图生成状态
-  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   
   // 分页状态
   const [currentPage, setCurrentPage] = useState(1);
@@ -74,42 +78,6 @@ export default function Create() {
     if (bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, []);
-
-  /**
-   * 统一的 PendingTask 清理函数
-   * Requirements: 3.1
-   */
-  const removePendingTask = useCallback((identifier: { tempId?: string; taskId?: string; batchId?: string }): void => {
-    const { tempId, taskId, batchId } = identifier;
-    
-    setPendingTasks(prev => {
-      if (tempId) {
-        return prev.filter(p => p.id !== tempId);
-      }
-      if (taskId) {
-        return prev.filter(p => p.taskId !== taskId);
-      }
-      if (batchId) {
-        return prev.filter(p => p.batchId !== batchId);
-      }
-      return prev;
-    });
-  }, []);
-
-  /**
-   * 更新 PendingTask 的 batchId
-   */
-  const updatePendingTaskBatchId = useCallback((tempId: string, batchId: string) => {
-    setPendingTasks(prev => prev.map(p => 
-      p.id === tempId ? { ...p, batchId } : p
-    ));
-  }, []);
-
-  // 判断批次是否包含失败的图片（用于决定是否保留在 batchResults 中）
-  // 失败的图片不会保存到后端历史记录，所以需要在前端保留显示
-  const batchHasFailedImages = useCallback((batch: BatchResult): boolean => {
-    return batch.images.some(img => img.error);
   }, []);
 
   // 加载历史记录（重置到第一页）

@@ -5,6 +5,44 @@
 // 默认后端 URL（本地 HTTP）
 const DEFAULT_BACKEND_URL = 'http://localhost:51888';
 
+// 后端就绪状态管理（Electron 环境下等待后端启动完成）
+let backendReady = false;
+let backendReadyPromise: Promise<void> | null = null;
+
+const waitForBackendReady = (): Promise<void> => {
+  // 非 Electron 环境或已就绪，直接返回
+  if (backendReady || typeof window === 'undefined' || !window.electronAPI?.onBackendReady) {
+    return Promise.resolve();
+  }
+
+  // 复用已有的 promise，避免重复监听
+  if (backendReadyPromise) {
+    return backendReadyPromise;
+  }
+
+  backendReadyPromise = new Promise<void>((resolve) => {
+    console.log('[API] 等待后端服务就绪...');
+
+    // 监听 backend-ready 事件
+    window.electronAPI!.onBackendReady(() => {
+      console.log('[API] ✓ 收到后端就绪信号');
+      backendReady = true;
+      resolve();
+    });
+
+    // 超时兜底：最多等 15 秒，之后强制继续（后端可能已经启动但事件丢失）
+    setTimeout(() => {
+      if (!backendReady) {
+        console.warn('[API] 后端就绪等待超时（15s），尝试继续...');
+        backendReady = true;
+        resolve();
+      }
+    }, 15000);
+  });
+
+  return backendReadyPromise;
+};
+
 // API 日志功能（始终启用，用于调试）
 const logAPI = (type: 'REQUEST' | 'RESPONSE', method: string, url: string, data?: unknown, duration?: number, status?: number) => {
   const timestamp = new Date().toISOString();
@@ -55,6 +93,8 @@ const getCachedApiUrl = async (): Promise<string> => {
   if (cachedApiUrl) {
     return cachedApiUrl;
   }
+  // 在 Electron 环境下，先等待后端就绪
+  await waitForBackendReady();
   cachedApiUrl = await getApiBaseUrl();
   return cachedApiUrl;
 };
@@ -63,7 +103,8 @@ const getCachedApiUrl = async (): Promise<string> => {
 const fetchWithTimeout = async (
   url: string,
   options: RequestInit,
-  timeoutMs: number = 900000 // 默认 15 分钟超时
+  timeoutMs: number = 900000, // 默认 15 分钟超时
+  timeoutMessage?: string // 自定义超时错误消息
 ): Promise<Response> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -78,7 +119,7 @@ const fetchWithTimeout = async (
   } catch (error) {
     clearTimeout(timeoutId);
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('服务器负载异常，不会消耗次数，请重试');
+      throw new Error(timeoutMessage || '请求超时，请检查网络连接后重试');
     }
     throw error;
   }
@@ -128,7 +169,7 @@ export interface SSECallbacks {
 }
 
 export const api = {
-  // 生成图片（超时时间 3 分钟）
+  // 生成图片（超时时间 5 分钟，仅覆盖上传阶段，后端收到后立即返回 task_id）
   async generate(formData: FormData): Promise<Response> {
     const baseUrl = await getCachedApiUrl();
     const url = `${baseUrl}/generate`;
@@ -152,7 +193,8 @@ export const api = {
           method: 'POST',
           body: formData,
         },
-        180000 // 3 分钟超时（上传图片时需要更多时间处理）
+        300000, // 5 分钟超时（覆盖大图上传 + 后端接收，AI 生成在后台异步进行）
+        '上传超时，可能是网络较慢或图片过大，请检查网络后重试'
       );
       
       const duration = Date.now() - startTime;
