@@ -9,6 +9,7 @@ import type { SSEStartEvent, SSEImageEvent, SSECompleteEvent } from '../api';
 import { api } from '../api';
 import { useToast } from '../context/ToastContext';
 import { useGlobalTask } from '../context/GlobalTaskContext';
+import { useConfig } from '../context/ConfigContext';
 import { getErrorMessage } from '../utils/errorHandler';
 import { compressImages } from '../utils/imageCompressor';
 
@@ -71,6 +72,7 @@ export default function PromptBar({
   
   const toast = useToast();
   const { registerTask } = useGlobalTask();
+  const { model } = useConfig();
   
   // 综合禁用状态：外部禁用
   const isDisabled = disabled;
@@ -131,6 +133,14 @@ export default function PromptBar({
     setImageSize(initialImageSize);
   }, [initialImageSize, promptVersion]);
 
+  // 当模型从 focus-fast 切换为 focus 时，如果当前宽高比为专属比例，自动重置为 1:1
+  useEffect(() => {
+    const focusFastExtraRatios: AspectRatio[] = ['1:4', '4:1', '1:8', '8:1'];
+    if (model === 'focus' && focusFastExtraRatios.includes(aspectRatio)) {
+      setAspectRatio('1:1');
+    }
+  }, [model, aspectRatio]);
+
   // 统一更新文件的辅助函数（同时更新内部状态和通知父组件）
   // 限制最多 5 张参考图
   const updateFiles = (newFiles: File[]) => {
@@ -173,7 +183,7 @@ export default function PromptBar({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       const newHeight = Math.min(textareaRef.current.scrollHeight, 200);
-      textareaRef.current.style.height = `${Math.max(newHeight, 80)}px`;
+      textareaRef.current.style.height = `${Math.max(newHeight, 48)}px`;
     }
   }, [prompt]);
 
@@ -392,7 +402,7 @@ export default function PromptBar({
     // 立即清空输入框，让用户可以编辑下一个任务
     setPrompt('');
     updateFiles([]);
-    if(textareaRef.current) textareaRef.current.style.height = '80px';
+    if(textareaRef.current) textareaRef.current.style.height = '48px';
 
     // 修复：通知父组件开始生成，并获取 tempId
     // tempId 用于在整个异步生命周期中精确关联请求和响应
@@ -406,6 +416,7 @@ export default function PromptBar({
       formData.append('aspectRatio', currentAspectRatio);
       formData.append('imageSize', currentImageSize);
       formData.append('count', String(currentImageCount));
+      formData.append('model', model);
       
       currentFiles.forEach((file) => {
         formData.append('images', file);
@@ -505,7 +516,7 @@ export default function PromptBar({
       isSubmittingRef.current = false;
       setIsSending(false); // 重置发送状态
     }
-  }, [prompt, files, imageCount, aspectRatio, imageSize, onGenerateStart, onSSEStart, onSSEImage, onSSEComplete, onGenerateMulti, onGenerate, onTaskCreated, onError, toast, registerTask]);
+  }, [prompt, files, imageCount, aspectRatio, imageSize, model, onGenerateStart, onSSEStart, onSSEImage, onSSEComplete, onGenerateMulti, onGenerate, onTaskCreated, onError, toast, registerTask]);
 
   // 监听外部触发生成（用于"再次生成"功能）
   useEffect(() => {
@@ -565,7 +576,7 @@ export default function PromptBar({
         )}
 
         {/* 左侧：图片上传区域 */}
-        <div className="flex-shrink-0 flex flex-col justify-start self-start pt-2 pl-2 min-w-[70px] h-full">
+        <div className="shrink-0 flex flex-col justify-start self-start pt-2 pl-2 min-w-[70px] h-full">
           <ImageUpload 
             files={files} 
             onFilesChange={updateFiles} // 使用新的 updateFiles
@@ -582,10 +593,10 @@ export default function PromptBar({
             onKeyDown={handleKeyDown}
             onPaste={handlePaste} // 绑定粘贴事件
             className="w-full bg-transparent border-none outline-none text-gray-800 placeholder-gray-400 text-base leading-relaxed resize-none py-1"
-            rows={3}
+            rows={2}
             placeholder="描述你想要的画面，或拖入/粘贴图片..."
             disabled={isDisabled} // 只在外部禁用时禁用，生成中仍可编辑
-            style={{ minHeight: '80px' }}
+            style={{ minHeight: '48px' }}
           />
         </div>
 
@@ -600,6 +611,7 @@ export default function PromptBar({
                 onAspectRatioChange={setAspectRatio}
                 onImageSizeChange={setImageSize}
                 disabled={isDisabled}
+                model={model}
               />
             </div>
           )}

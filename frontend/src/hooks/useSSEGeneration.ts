@@ -26,6 +26,8 @@ export interface UseSSEGenerationParams {
   onGenerationComplete?: () => void;
   /** 余额不足错误回调 */
   onQuotaError?: () => void;
+  /** 获取当前模型的函数 */
+  getCurrentModel?: () => string;
 }
 
 /**
@@ -63,6 +65,7 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
     removePendingTask,
     onGenerationComplete,
     onQuotaError,
+    getCurrentModel,
   } = params;
 
   // SSE 流式生成状态 - 支持多个并发批次
@@ -84,6 +87,7 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
       refImages: event.ref_images || [],
       aspectRatio: event.aspect_ratio,
       imageSize: event.image_size,
+      model: getCurrentModel?.(),
       status: 'streaming',
     });
 
@@ -99,7 +103,7 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
       newMap.set(event.batch_id, newBatch);
       return newMap;
     });
-  }, [removePendingTask]);
+  }, [removePendingTask, getCurrentModel]);
 
   /**
    * SSE 图片事件处理
@@ -217,6 +221,7 @@ export function useSSEGeneration(params: UseSSEGenerationParams): UseSSEGenerati
             refImages: event.ref_images || currentBatch.refImages || [],
             aspectRatio: currentBatch.aspectRatio,
             imageSize: currentBatch.imageSize,
+            model: currentBatch.model,
             status: batchStatus,
           });
           

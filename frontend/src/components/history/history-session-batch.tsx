@@ -10,7 +10,7 @@ import ImageGrid from '../ImageGrid';
 
 export interface HistorySessionBatchProps {
   batch: BatchResult;
-  onImageClick: (url: string) => void;
+  onImageClick: (url: string, batchUrls?: string[], indexInBatch?: number) => void;
   onUseAsReference: (url: string) => void;
   onEditPrompt: (batch: BatchResult) => void;
   onRegenerate: (batch: BatchResult) => void;

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { api } from '../api';
+import type { ModelType } from '../type';
 import ApiKeyModal from '../components/ApiKeyModal';
 import DisclaimerModal from '../components/DisclaimerModal';
 
@@ -9,6 +10,9 @@ interface ConfigContextType {
   hasApiKey: boolean;
   hasAgreedDisclaimer: boolean;
   showModal: boolean;
+  platform: string;
+  model: ModelType;
+  setModel: (model: ModelType) => void;
   openSettings: () => void;
   checkConfig: () => Promise<void>;
 }
@@ -21,6 +25,19 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
+  const [platform, setPlatform] = useState('unknown');
+  const [model, setModelState] = useState<ModelType>('focus');
+
+  // 当平台变为非 vectorengine 时，自动重置模型为 focus
+  const setModel = (newModel: ModelType) => {
+    setModelState(newModel);
+  };
+
+  useEffect(() => {
+    if (platform !== 'vectorengine') {
+      setModelState('focus');
+    }
+  }, [platform]);
 
   const checkConfig = async () => {
     try {
@@ -35,6 +52,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         
         setHasApiKey(data.has_api_key);
         setHasAgreedDisclaimer(data.disclaimer_agreed);
+        setPlatform(data.platform || 'unknown');
         
         // 启动流程：先免责声明，再 API Key
         if (!data.disclaimer_agreed) {
@@ -89,6 +107,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       hasApiKey, 
       hasAgreedDisclaimer,
       showModal: showApiKeyModal, 
+      platform,
+      model,
+      setModel,
       openSettings, 
       checkConfig 
     }}>

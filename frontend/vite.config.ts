@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import portDiscoveryPlugin from './vite-plugin-port-discovery'
@@ -24,6 +24,13 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: false, // Allow Vite to try next port if 5174 is occupied
+  },
+  test: {
+    include: [
+      'src/**/*.test.{ts,tsx}',
+      '../tests/**/*.test.ts',
+    ],
+    globals: true,
   },
   esbuild: {
     // 根据 ENABLE_FRONTEND_CONSOLE 开关决定是否保留 console

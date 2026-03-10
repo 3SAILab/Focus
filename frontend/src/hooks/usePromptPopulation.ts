@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import type { GenerationHistory, AspectRatio, ImageSize } from '../type';
+import type { GenerationHistory, AspectRatio, ImageSize, ModelType } from '../type';
 import type { BatchResult } from '../type/generation';
 import { loadReferenceFiles } from '../utils/referenceImages';
 
@@ -27,6 +27,7 @@ export interface PopulatePromptParams {
   imageCount?: number;
   aspectRatio?: AspectRatio;
   imageSize?: ImageSize;
+  model?: ModelType;
   autoTrigger: boolean;
 }
 
@@ -75,7 +76,8 @@ export interface UsePromptPopulationResult {
  */
 export function usePromptPopulation(
   toast: ToastContext,
-  scrollToBottom?: () => void
+  scrollToBottom?: () => void,
+  setModel?: (model: ModelType) => void
 ): UsePromptPopulationResult {
   // States - Requirements: 4.2
   const [selectedPrompt, setSelectedPrompt] = useState('');
@@ -92,9 +94,9 @@ export function usePromptPopulation(
    * Requirements: 4.3
    */
   const populatePromptBar = useCallback(async (params: PopulatePromptParams): Promise<void> => {
-    const { prompt, refImages, imageCount = 1, aspectRatio = '1:1', imageSize = '2K', autoTrigger } = params;
+    const { prompt, refImages, imageCount = 1, aspectRatio = '1:1', imageSize = '2K', model, autoTrigger } = params;
     
-    console.log('[usePromptPopulation] populatePromptBar 被调用:', { prompt, refImages, imageCount, aspectRatio, imageSize, autoTrigger });
+    console.log('[usePromptPopulation] populatePromptBar 被调用:', { prompt, refImages, imageCount, aspectRatio, imageSize, model, autoTrigger });
     
     try {
       // 1. 加载参考图（最多 5 张）
@@ -123,6 +125,12 @@ export function usePromptPopulation(
       console.log('[usePromptPopulation] 设置 selectedImageSize:', imageSize);
       setSelectedImageSize(imageSize);
       
+      // 恢复模型选择
+      if (model && setModel) {
+        console.log('[usePromptPopulation] 恢复模型:', model);
+        setModel(model);
+      }
+      
       // 3. 根据 autoTrigger 决定是否触发生成
       if (autoTrigger) {
         console.log('[usePromptPopulation] autoTrigger=true，200ms 后触发生成');
@@ -148,12 +156,15 @@ export function usePromptPopulation(
         setSelectedImageCount(count);
         setSelectedAspectRatio(aspectRatio);
         setSelectedImageSize(imageSize);
+        if (model && setModel) {
+          setModel(model);
+        }
         setTimeout(() => setTriggerGenerate(true), 200);
       } else {
         toast.error('加载失败，请稍后重试');
       }
     }
-  }, [toast, scrollToBottom]);
+  }, [toast, scrollToBottom, setModel]);
 
   /**
    * 重新生成：使用历史记录的提示词和参考图
@@ -167,6 +178,7 @@ export function usePromptPopulation(
       imageCount: item.batch_total || 1,
       aspectRatio: (item.aspect_ratio as AspectRatio) || '1:1',
       imageSize: (item.image_size as ImageSize) || '2K',
+      model: (item.model as ModelType) || undefined,
       autoTrigger: true,
     });
   }, [populatePromptBar]);
@@ -183,6 +195,7 @@ export function usePromptPopulation(
       imageCount: item.batch_total || 1,
       aspectRatio: (item.aspect_ratio as AspectRatio) || '1:1',
       imageSize: (item.image_size as ImageSize) || '2K',
+      model: (item.model as ModelType) || undefined,
       autoTrigger: false,
     });
   }, [populatePromptBar]);
@@ -198,6 +211,7 @@ export function usePromptPopulation(
       imageCount: batch.imageCount || 1,
       aspectRatio: (batch.aspectRatio as AspectRatio) || '1:1',
       imageSize: (batch.imageSize as ImageSize) || '2K',
+      model: (batch.model as ModelType) || undefined,
       autoTrigger: true,
     });
   }, [populatePromptBar]);
@@ -213,6 +227,7 @@ export function usePromptPopulation(
       imageCount: batch.imageCount || 1,
       aspectRatio: (batch.aspectRatio as AspectRatio) || '1:1',
       imageSize: (batch.imageSize as ImageSize) || '2K',
+      model: (batch.model as ModelType) || undefined,
       autoTrigger: false,
     });
   }, [populatePromptBar]);

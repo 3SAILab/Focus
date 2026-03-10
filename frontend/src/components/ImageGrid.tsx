@@ -14,7 +14,7 @@ export interface ImageGridItem {
 
 interface ImageGridProps {
   images: ImageGridItem[];
-  onImageClick: (url: string) => void;
+  onImageClick: (url: string, batchUrls?: string[], indexInBatch?: number) => void;
   onUseAsReference?: (url: string) => void;
   prompt?: string;        // 用于显示在错误卡片中
   showFooter?: boolean;   // 是否在加载占位卡片中显示底部区域（与 ImageCard 保持一致）
@@ -72,10 +72,14 @@ function GridImageCard({
   url,
   onImageClick,
   onUseAsReference,
+  batchUrls,
+  indexInBatch,
 }: {
   url: string;
-  onImageClick: (url: string) => void;
+  onImageClick: (url: string, batchUrls?: string[], indexInBatch?: number) => void;
   onUseAsReference?: (url: string) => void;
+  batchUrls?: string[];
+  indexInBatch?: number;
 }) {
   const toast = useToast();
   const [isHovered, setIsHovered] = useState(false);
@@ -137,7 +141,7 @@ function GridImageCard({
             className="w-full aspect-square object-cover transition-transform duration-700 group-hover:scale-105 cursor-pointer"
             loading="lazy"
             draggable
-            onClick={() => onImageClick(url)}
+            onClick={() => onImageClick(url, batchUrls, indexInBatch)}
             onContextMenu={handleContextMenu}
             onDragStart={handleDragStart}
             alt="生成的图片"
@@ -211,6 +215,9 @@ export default function ImageGrid({
     return 'grid grid-cols-2 gap-3 max-w-xl';
   };
 
+  // 计算批次中所有成功图片的 URL 列表
+  const batchUrls = images.filter(img => img.url).map(img => img.url!);
+
   const renderItem = (item: ImageGridItem) => {
     if (item.isLoading) {
       return <LoadingCard key={`loading-${item.index}`} showFooter={showFooter} />;
@@ -226,12 +233,16 @@ export default function ImageGrid({
     }
 
     if (item.url) {
+      // 计算当前图片在成功图片列表中的索引
+      const indexInBatch = batchUrls.indexOf(item.url);
       return (
         <GridImageCard
           key={`image-${item.index}`}
           url={item.url}
           onImageClick={onImageClick}
           onUseAsReference={onUseAsReference}
+          batchUrls={batchUrls.length > 1 ? batchUrls : undefined}
+          indexInBatch={batchUrls.length > 1 ? indexInBatch : undefined}
         />
       );
     }

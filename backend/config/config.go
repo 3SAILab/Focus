@@ -81,6 +81,9 @@ var (
 	// AiaimiServiceURL Aiaimi 平台 AI 服务 API 地址
 	AiaimiServiceURL string
 
+	// FocusFastServiceURL Focus-Fast 模型 API 地址（VectorEngine 专属）
+	FocusFastServiceURL string
+
 	// SensitiveKeywords 敏感关键词列表（用于过滤错误信息）
 	SensitiveKeywords []string
 )
@@ -109,6 +112,7 @@ var defaultServiceConfig = ServiceConfig{
 		"gemini", "gemini-3", "gemini3", "gemini-pro",
 		"gemini3pro", "gemini-3-pro", "image-preview",
 		"gemini-3-pro-image-preview", "models/", "vectorengine",
+		"gemini-3.1-flash", "flash-image-preview",
 	},
 }
 
@@ -134,6 +138,13 @@ var aiaimiServiceConfig = ServiceConfig{
 		"gemini3pro", "gemini-3-pro", "image-preview",
 		"gemini-3-pro-image-preview", "models/", "aiaimi",
 	},
+}
+
+// Focus-Fast 模型服务配置（VectorEngine 专属）
+// 使用 gemini-3.1-flash-image-preview 模型（0.5x 价格）
+// URL: https://api.vectorengine.ai/v1beta/models/gemini-3.1-flash-image-preview:generateContent
+var focusFastServiceConfig = ServiceConfig{
+	APIURL: decodeConfig("aHR0cHM6Ly9hcGkudmVjdG9yZW5naW5lLmFpL3YxYmV0YS9tb2RlbHMvZ2VtaW5pLTMuMS1mbGFzaC1pbWFnZS1wcmV2aWV3OmdlbmVyYXRlQ29udGVudA=="),
 }
 
 // decodeConfig 解码 base64 配置
@@ -256,6 +267,10 @@ func Init() {
 	// 初始化 Aiaimi 服务 URL
 	AiaimiServiceURL = aiaimiServiceConfig.APIURL
 	configLog("Aiaimi 服务 URL 已初始化")
+
+	// 初始化 Focus-Fast 服务 URL
+	FocusFastServiceURL = focusFastServiceConfig.APIURL
+	configLog("Focus-Fast 服务 URL 已初始化")
 
 	// 默认平台为 VectorEngine
 	APIPlatform = PlatformVectorEngine
@@ -541,6 +556,24 @@ func GetCurrentAIServiceURL() string {
 	default:
 		return AIServiceURL
 	}
+}
+
+// GetAIServiceURLByModel 根据模型名称和当前平台获取 API URL
+// Aiaimi 平台不支持 Focus-Fast，始终返回默认 URL
+// VectorEngine 平台根据 model 参数选择对应 URL
+// 无效或空 model 值默认使用 Focus 模型 URL
+func GetAIServiceURLByModel(model string) string {
+	platform := GetAPIPlatform()
+	// Aiaimi 平台不支持 Focus-Fast，始终使用默认 URL
+	if platform == PlatformAiaimi {
+		return AiaimiServiceURL
+	}
+	// VectorEngine 平台根据 model 参数选择
+	if model == "focus-fast" {
+		return FocusFastServiceURL
+	}
+	// 默认使用 Focus 模型
+	return AIServiceURL
 }
 
 // SetAPITokenWithPlatform 设置 API Token 并指定平台

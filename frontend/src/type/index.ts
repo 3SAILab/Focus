@@ -23,6 +23,7 @@ export interface GenerationHistory {
   image_deleted?: boolean; // 图片是否已被删除
   aspect_ratio?: string; // 图片比例
   image_size?: string;   // 图片尺寸
+  model?: string;        // 生成模型: focus | focus-fast
   created_at: string;
   updated_at?: string;
   // 多图生成批次信息
@@ -79,7 +80,11 @@ export type AspectRatio =
   | '1:1' 
   | '3:4' 
   | '2:3' 
-  | '9:16';
+  | '9:16'
+  | '9:21'
+  | '1:4' | '4:1' | '1:8' | '8:1';  // Focus-Fast 专属
+
+export type ModelType = 'focus' | 'focus-fast';
 
 export type ImageSize = '2K' | '4K';
 

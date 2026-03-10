@@ -12,9 +12,9 @@ import ImageGrid from '../ImageGrid';
 export interface HistoryBatchItemProps {
   displayItem: HistoryDisplayItem;
   index: number;
-  onImageClick: (url: string) => void;
-  onRegenerate: (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => void;
-  onEditPrompt: (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => void;
+  onImageClick: (url: string, batchUrls?: string[], indexInBatch?: number) => void;
+  onRegenerate: (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string, model?: string) => void;
+  onEditPrompt: (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string, model?: string) => void;
   onUseAsReference: (url: string) => void;
   onDelete: (batchId: string, items: GenerationHistory[]) => void;
 }
@@ -98,14 +98,14 @@ export function HistoryBatchItem({
         {/* 操作按钮 */}
         <div className="flex gap-1">
           <button
-            onClick={() => onEditPrompt(displayItem.prompt, displayItem.refImages, batchTotal, displayItem.aspectRatio, displayItem.imageSize)}
+            onClick={() => onEditPrompt(displayItem.prompt, displayItem.refImages, batchTotal, displayItem.aspectRatio, displayItem.imageSize, displayItem.model)}
             className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
             title="编辑提示词"
           >
             <span className="text-xs">重新编辑</span>
           </button>
           <button
-            onClick={() => onRegenerate(displayItem.prompt, displayItem.refImages, batchTotal, displayItem.aspectRatio, displayItem.imageSize)}
+            onClick={() => onRegenerate(displayItem.prompt, displayItem.refImages, batchTotal, displayItem.aspectRatio, displayItem.imageSize, displayItem.model)}
             className="p-1.5 rounded-lg transition-colors text-gray-400 hover:text-red-500 hover:bg-red-50"
             title="重新生成"
           >

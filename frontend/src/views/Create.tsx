@@ -8,12 +8,13 @@ import PromptBar from '../components/PromptBar';
 import { PageHeader } from '../components/common';
 import { QuotaErrorHandler } from '../components/feedback';
 import { AlertDialog } from '../components/ui/alert-dialog';
-import type { GenerationHistory, GenerationTask, GenerateMultiResponse, GenerateResponse, AspectRatio, ImageSize } from '../type';
+import type { GenerationHistory, GenerationTask, GenerateMultiResponse, GenerateResponse, AspectRatio, ImageSize, ModelType } from '../type';
 import { GenerationType } from '../type';
 import { api } from '../api';
 import { loadImageAsFile } from '../utils';
 import { useToast } from '../context/ToastContext';
 import { useGlobalTask } from '../context/GlobalTaskContext';
+import { useConfig } from '../context/ConfigContext';
 import { getErrorMessage } from '../utils/errorHandler';
 import { useTaskRecovery } from '../hooks/useTaskRecovery';
 
@@ -41,8 +42,9 @@ import {
 export default function Create() {
   const toast = useToast();
   const { getFailedTask, clearFailedTask, getCompletedTask, clearCompletedTask } = useGlobalTask();
+  const { model, setModel } = useConfig();
   const [history, setHistory] = useState<GenerationHistory[]>([]);
-  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [lightboxData, setLightboxData] = useState<{ url: string | null; urls?: string[]; index?: number } | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   
@@ -333,7 +335,7 @@ export default function Create() {
     handleEditPrompt,
     handleRegenerateBatchWithRef,
     handleEditBatchPromptWithRef,
-  } = usePromptPopulation(toast, scrollToBottom);
+  } = usePromptPopulation(toast, scrollToBottom, setModel);
 
   // 包装 setSelectedFiles，确保最多 5 张参考图
   const handleFilesChange = useCallback((files: File[]) => {
@@ -363,6 +365,7 @@ export default function Create() {
       setSelectedFiles([]);
     },
     onQuotaError: () => setShowQuotaError(true),
+    getCurrentModel: () => model,
   });
 
   // 监控 streamingBatches 状态变化
@@ -402,6 +405,20 @@ export default function Create() {
 
   // 计算任务运行状态
   const isTaskRunning = isGenerating || !!currentTaskId || processingTasks.length > 0 || streamingBatches.size > 0;
+
+  // 图片点击处理（支持批次信息）
+  const handleImageClick = useCallback((url: string, batchUrls?: string[], indexInBatch?: number) => {
+    setLightboxData({
+      url,
+      urls: batchUrls,
+      index: indexInBatch,
+    });
+  }, []);
+
+  // 单图预览（PromptBar 等不需要批次信息的场景）
+  const handlePreviewImage = useCallback((url: string) => {
+    setLightboxData({ url });
+  }, []);
 
   useEffect(() => {
     loadHistory();
@@ -571,6 +588,7 @@ export default function Create() {
           refImages: refImageUrls,
           aspectRatio: aspectRatio || selectedAspectRatio,
           imageSize: imageSize || selectedImageSize,
+          model: model,
           status: 'failed',
         });
         console.log('[Create] Created failedBatch:', failedBatch);
@@ -594,6 +612,7 @@ export default function Create() {
           imageCount: count,
           aspectRatio: aspectRatio || selectedAspectRatio,
           imageSize: imageSize || selectedImageSize,
+          model: model,
         };
         console.log('[Create] Created failedRecord:', failedRecord);
         // 先添加失败记录，再移除 pendingTask
@@ -679,12 +698,13 @@ export default function Create() {
       imageCount: item.batch_total || 1,
       aspectRatio: (item.aspect_ratio as AspectRatio) || '1:1',
       imageSize: (item.image_size as ImageSize) || '2K',
+      model: (item.model as ModelType) || undefined,
       autoTrigger: true,
     });
   }, [populatePromptBar]);
 
   // 编辑失败记录的提示词
-  const handleEditFailedPrompt = useCallback(async (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => {
+  const handleEditFailedPrompt = useCallback(async (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string, failedModel?: string) => {
     console.log('[Create] handleEditFailedPrompt 被调用，prompt:', prompt, 'refImages:', refImages?.length);
     await populatePromptBar({
       prompt,
@@ -692,12 +712,13 @@ export default function Create() {
       imageCount: imageCount || 1,
       aspectRatio: (aspectRatio as AspectRatio) || '1:1',
       imageSize: (imageSize as ImageSize) || '2K',
+      model: (failedModel as ModelType) || undefined,
       autoTrigger: false,
     });
   }, [populatePromptBar]);
 
   // 重新生成失败记录
-  const handleRegenerateFailedPrompt = useCallback(async (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => {
+  const handleRegenerateFailedPrompt = useCallback(async (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string, failedModel?: string) => {
     console.log('[Create] handleRegenerateFailedPrompt 被调用，prompt:', prompt, 'refImages:', refImages?.length);
     await populatePromptBar({
       prompt,
@@ -705,30 +726,33 @@ export default function Create() {
       imageCount: imageCount || 1,
       aspectRatio: (aspectRatio as AspectRatio) || '1:1',
       imageSize: (imageSize as ImageSize) || '2K',
+      model: (failedModel as ModelType) || undefined,
       autoTrigger: true,
     });
   }, [populatePromptBar]);
 
   // 批次重新生成（用于 HistoryBatchItem）
-  const handleBatchRegenerate = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => {
+  const handleBatchRegenerate = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string, model?: string) => {
     await populatePromptBar({
       prompt,
       refImages,
       imageCount: imageCount || 1,
       aspectRatio: (aspectRatio as AspectRatio) || '1:1',
       imageSize: (imageSize as ImageSize) || '2K',
+      model: (model as ModelType) || undefined,
       autoTrigger: true,
     });
   }, [populatePromptBar]);
 
   // 批次编辑提示词（用于 HistoryBatchItem）
-  const handleBatchEditPrompt = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => {
+  const handleBatchEditPrompt = useCallback(async (prompt: string, refImages?: string | string[], imageCount?: number, aspectRatio?: string, imageSize?: string, model?: string) => {
     await populatePromptBar({
       prompt,
       refImages,
       imageCount: imageCount || 1,
       aspectRatio: (aspectRatio as AspectRatio) || '1:1',
       imageSize: (imageSize as ImageSize) || '2K',
+      model: (model as ModelType) || undefined,
       autoTrigger: false,
     });
   }, [populatePromptBar]);
@@ -797,7 +821,7 @@ export default function Create() {
                   key={displayItem.item.id || `history-${index}`}
                   item={displayItem.item}
                   index={index}
-                  onImageClick={setLightboxImage}
+                  onImageClick={handleImageClick}
                   onRegenerate={handleRegenerate}
                   onEditPrompt={handleEditPrompt}
                   onUseAsReference={handleUseAsReference}
@@ -814,7 +838,7 @@ export default function Create() {
                   key={displayItem.batchId || `batch-${index}`}
                   displayItem={displayItem}
                   index={index}
-                  onImageClick={setLightboxImage}
+                  onImageClick={handleImageClick}
                   onRegenerate={handleBatchRegenerate}
                   onEditPrompt={handleBatchEditPrompt}
                   onUseAsReference={handleUseAsReference}
@@ -842,7 +866,7 @@ export default function Create() {
                 <HistorySessionBatch
                   key={displayItem.sessionBatch.batchId}
                   batch={displayItem.sessionBatch}
-                  onImageClick={setLightboxImage}
+                  onImageClick={handleImageClick}
                   onUseAsReference={handleUseAsReference}
                   onEditPrompt={handleEditBatchPromptWithRef}
                   onRegenerate={handleRegenerateBatchWithRef}
@@ -877,7 +901,7 @@ export default function Create() {
                 <HistoryStreamingItem
                   key={`streaming-${displayItem.sessionBatch.batchId}`}
                   batch={displayItem.sessionBatch}
-                  onImageClick={setLightboxImage}
+                  onImageClick={handleImageClick}
                   onUseAsReference={handleUseAsReference}
                 />
               );
@@ -903,7 +927,7 @@ export default function Create() {
         initialAspectRatio={selectedAspectRatio}
         initialImageSize={selectedImageSize}
         onFilesChange={handleFilesChange} 
-        onPreviewImage={setLightboxImage}
+        onPreviewImage={handlePreviewImage}
         triggerGenerate={triggerGenerate}
         onTriggered={() => {
           setTriggerGenerate(false);
@@ -958,7 +982,12 @@ export default function Create() {
         </button>
       )}
 
-      <Lightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
+      <Lightbox
+        imageUrl={lightboxData?.url ?? null}
+        imageUrls={lightboxData?.urls}
+        currentIndex={lightboxData?.index}
+        onClose={() => setLightboxData(null)}
+      />
       
       {/* 配额错误处理 */}
       <QuotaErrorHandler

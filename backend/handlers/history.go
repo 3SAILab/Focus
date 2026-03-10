@@ -32,6 +32,10 @@ func convertHistoryToResponse(history []models.GenerationHistory) []models.Gener
 		if imageSize == "" {
 			imageSize = "2K"
 		}
+		model := h.Model
+		if model == "" {
+			model = "focus"
+		}
 
 		response[i] = models.GenerationHistoryResponse{
 			ID:             h.ID,
@@ -44,6 +48,7 @@ func convertHistoryToResponse(history []models.GenerationHistory) []models.Gener
 			ImageDeleted:   h.ImageDeleted,
 			AspectRatio:    aspectRatio,
 			ImageSize:      imageSize,
+			Model:          model,
 			CreatedAt:      h.CreatedAt,
 			UpdatedAt:      h.UpdatedAt,
 			BatchID:        h.BatchID,

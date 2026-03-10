@@ -1,7 +1,7 @@
 {
   "name": "focus",
-  "version": "1.0.6",
-  "versionCode": "202601231000",
+  "version": "1.0.7",
+  "versionCode": "202603101030",
   "description": "Focus AI Image Generation Tool - Beta版",
   "main": "electron/main.js",
   "scripts": {

@@ -79,6 +79,12 @@ func GenerateHandler(c *gin.Context) {
 		count = 4
 	}
 
+	// 解析 model 参数（默认 focus）
+	model := c.PostForm("model")
+	if model == "" {
+		model = "focus"
+	}
+
 	parts := []types.Part{{Text: prompt}}
 	var savedRefImages []string
 
@@ -134,17 +140,17 @@ func GenerateHandler(c *gin.Context) {
 
 	// 8.2: count=1 时保持现有逻辑（完全向后兼容）
 	if count == 1 {
-		generateSingleImage(c, currentToken, prompt, aspectRatio, imageSize, generationType, parts, savedRefImages, refImagesJSON, taskID, &task)
+		generateSingleImage(c, currentToken, prompt, aspectRatio, imageSize, generationType, parts, savedRefImages, refImagesJSON, taskID, &task, model)
 		return
 	}
 
 	// 8.3 & 8.4 & 8.5: count>1 时循环调用 AI API，返回 images 数组，存储多条历史记录
-	generateMultipleImages(c, currentToken, prompt, aspectRatio, imageSize, generationType, parts, savedRefImages, refImagesJSON, taskID, &task, count)
+	generateMultipleImages(c, currentToken, prompt, aspectRatio, imageSize, generationType, parts, savedRefImages, refImagesJSON, taskID, &task, count, model)
 }
 
 // generateSingleImage 生成单张图片 - 异步模式
 // 立即返回 task_id，在后台 goroutine 中处理 AI 请求
-func generateSingleImage(c *gin.Context, currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, savedRefImages []string, refImagesJSON []byte, taskID string, task *models.GenerationTask) {
+func generateSingleImage(c *gin.Context, currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, savedRefImages []string, refImagesJSON []byte, taskID string, task *models.GenerationTask, model string) {
 	// 转换相对路径为完整 URL 返回给前端
 	absoluteRefImages := make([]string, len(savedRefImages))
 	for i, ref := range savedRefImages {
@@ -160,7 +166,7 @@ func generateSingleImage(c *gin.Context, currentToken, prompt, aspectRatio, imag
 
 	// 在后台 goroutine 中处理 AI 请求
 	go func() {
-		processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generationType, parts, refImagesJSON, taskID, task)
+		processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generationType, parts, refImagesJSON, taskID, task, model)
 	}()
 }
 
@@ -315,7 +321,7 @@ type AICallResult struct {
 func callAIAPI(apiURL, currentToken string, payloadBytes []byte, taskID string) AICallResult {
 	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		return AICallResult{Success: false, ErrorMessage: err.Error()}
+		return AICallResult{Success: false, ErrorMessage: config.FilterSensitiveInfo(err.Error())}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
@@ -329,7 +335,7 @@ func callAIAPI(apiURL, currentToken string, payloadBytes []byte, taskID string) 
 
 	if err != nil {
 		utils.LogAPIResponse(0, requestDuration, nil, err)
-		return AICallResult{Success: false, ErrorMessage: err.Error()}
+		return AICallResult{Success: false, ErrorMessage: config.FilterSensitiveInfo(err.Error())}
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
@@ -354,9 +360,10 @@ func callAIAPI(apiURL, currentToken string, payloadBytes []byte, taskID string) 
 		if err := json.Unmarshal(respBody, &apiError); err == nil && apiError.Error.Message != "" {
 			errorMessage = apiError.Error.Message
 		}
+		filteredMessage := config.FilterSensitiveInfo(errorMessage)
 		return AICallResult{
 			Success:      false,
-			ErrorMessage: errorMessage,
+			ErrorMessage: filteredMessage,
 			StatusCode:   resp.StatusCode,
 			IsQuotaError: isQuotaError(errorMessage),
 		}
@@ -433,7 +440,7 @@ func callAIAPI(apiURL, currentToken string, payloadBytes []byte, taskID string) 
 }
 
 // processAIGeneration 在后台处理 AI 生成请求
-func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, refImagesJSON []byte, taskID string, task *models.GenerationTask) {
+func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, refImagesJSON []byte, taskID string, task *models.GenerationTask, model string) {
 	// 添加 recover 防止 goroutine panic 导致静默失败
 	defer func() {
 		if r := recover(); r != nil {
@@ -461,8 +468,8 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 
 	payloadBytes, _ := json.Marshal(payloadObj)
 
-	// 获取 API URL
-	apiURL := config.GetCurrentAIServiceURL()
+	// 获取 API URL（根据模型选择）
+	apiURL := config.GetAIServiceURLByModel(model)
 
 	utils.LogAPIRequest("POST", apiURL, payloadObj)
 	utils.LogJSON("Generate Request", payloadObj)
@@ -483,6 +490,7 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 			Type:        generationType,
 			AspectRatio: aspectRatio,
 			ImageSize:   imageSize,
+			Model:       model,
 		}
 		config.DB.Create(&newRecord)
 
@@ -506,7 +514,7 @@ func processAIGeneration(currentToken, prompt, aspectRatio, imageSize, generatio
 }
 
 // generateMultipleImages 生成多张图片（count > 1）- 使用 SSE 流式返回
-func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, savedRefImages []string, refImagesJSON []byte, taskID string, task *models.GenerationTask, count int) {
+func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, imageSize, generationType string, parts []types.Part, savedRefImages []string, refImagesJSON []byte, taskID string, task *models.GenerationTask, count int, model string) {
 	// 生成批次 ID
 	batchID := uuid.New().String()
 
@@ -555,7 +563,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 		go func(index int) {
 			defer wg.Done()
 
-			result := callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize, parts, index)
+			result := callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize, parts, index, model)
 
 			mu.Lock()
 			results[index] = result
@@ -574,6 +582,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 					Type:        generationType,
 					AspectRatio: aspectRatio,
 					ImageSize:   imageSize,
+					Model:       model,
 					BatchID:     &batchID,
 					BatchIndex:  &batchIndex,
 					BatchTotal:  &batchTotal,
@@ -708,7 +717,7 @@ func generateMultipleImages(c *gin.Context, currentToken, prompt, aspectRatio, i
 }
 
 // callAIAPIForImage 调用 AI API 生成单张图片
-func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, parts []types.Part, index int) (result ImageResult) {
+func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, parts []types.Part, index int, model string) (result ImageResult) {
 	// 添加 recover 防止 panic 导致静默失败
 	defer func() {
 		if r := recover(); r != nil {
@@ -735,8 +744,8 @@ func callAIAPIForImage(currentToken, prompt, aspectRatio, imageSize string, part
 
 	payloadBytes, _ := json.Marshal(payloadObj)
 
-	// 获取 API URL
-	apiURL := config.GetCurrentAIServiceURL()
+	// 获取 API URL（根据模型选择）
+	apiURL := config.GetAIServiceURLByModel(model)
 
 	utils.LogAPIRequest("POST", apiURL, payloadObj)
 
@@ -751,7 +760,7 @@ func callAIAPIInternal(apiURL, currentToken string, payloadBytes []byte, index i
 	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		utils.LogAPI("图片 %d 创建请求失败: %s", index+1, err.Error())
-		return ImageResult{Error: err.Error(), Index: index}
+		return ImageResult{Error: config.FilterSensitiveInfo(err.Error()), Index: index}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+currentToken)
@@ -767,7 +776,7 @@ func callAIAPIInternal(apiURL, currentToken string, payloadBytes []byte, index i
 	if err != nil {
 		utils.LogAPIResponse(0, requestDuration, nil, err)
 		utils.LogAPI("图片 %d 请求失败: %s (耗时: %v)", index+1, err.Error(), requestDuration)
-		return ImageResult{Error: err.Error(), Index: index}
+		return ImageResult{Error: config.FilterSensitiveInfo(err.Error()), Index: index}
 	}
 	defer resp.Body.Close()
 
@@ -798,7 +807,7 @@ func callAIAPIInternal(apiURL, currentToken string, payloadBytes []byte, index i
 		}
 		filteredMessage := config.FilterSensitiveInfo(errorMessage)
 		utils.LogAPI("图片 %d API 错误: %s", index+1, filteredMessage)
-		return ImageResult{Error: errorMessage, Index: index} // 返回原始错误用于判断是否是余额错误
+		return ImageResult{Error: filteredMessage, Index: index}
 	}
 
 	var aiResp types.AIResponse

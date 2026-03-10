@@ -29,6 +29,7 @@ type GenerationHistory struct {
 	ImageDeleted   bool      `json:"image_deleted" gorm:"default:false"` // 图片是否已被删除
 	AspectRatio    string    `json:"aspect_ratio" gorm:"default:1:1"`    // 图片比例
 	ImageSize      string    `json:"image_size" gorm:"default:2K"`       // 图片尺寸
+	Model          string    `json:"model" gorm:"default:focus"`         // 生成模型: focus | focus-fast
 	// 多图生成批次字段（可空，用于安全迁移）
 	BatchID    *string `json:"batch_id,omitempty" gorm:"index"` // 批次 ID，关联同一次生成的多张图片
 	BatchIndex *int    `json:"batch_index,omitempty"`           // 批次内序号 (0-3)
@@ -52,6 +53,7 @@ type GenerationHistoryResponse struct {
 	ImageDeleted   bool      `json:"image_deleted"` // 图片是否已被删除
 	AspectRatio    string    `json:"aspect_ratio"`  // 图片比例
 	ImageSize      string    `json:"image_size"`    // 图片尺寸
+	Model          string    `json:"model"`         // 生成模型
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	// 多图生成批次字段

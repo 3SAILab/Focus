@@ -11,8 +11,8 @@ import { ERROR_MESSAGES } from '../../utils/errorHandler';
 
 export interface HistoryFailedItemProps {
   failedRecord: FailedGeneration;
-  onEditPrompt: (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => void;
-  onRegenerate: (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string) => void;
+  onEditPrompt: (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string, model?: string) => void;
+  onRegenerate: (prompt: string, refImages?: string[], imageCount?: number, aspectRatio?: string, imageSize?: string, model?: string) => void;
   onDelete: (failedId: string) => void;
 }
 
@@ -42,7 +42,8 @@ export function HistoryFailedItem({
               failedRecord.refImages,
               failedRecord.imageCount,
               failedRecord.aspectRatio,
-              failedRecord.imageSize
+              failedRecord.imageSize,
+              failedRecord.model
             )}
             className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
             title="编辑提示词"
@@ -55,7 +56,8 @@ export function HistoryFailedItem({
               failedRecord.refImages,
               failedRecord.imageCount,
               failedRecord.aspectRatio,
-              failedRecord.imageSize
+              failedRecord.imageSize,
+              failedRecord.model
             )}
             className="p-1.5 rounded-lg transition-colors text-gray-400 hover:text-red-500 hover:bg-red-50"
             title="重新生成"
@@ -91,14 +93,16 @@ export function HistoryFailedItem({
               failedRecord.refImages,
               failedRecord.imageCount,
               failedRecord.aspectRatio,
-              failedRecord.imageSize
+              failedRecord.imageSize,
+              failedRecord.model
             )}
             onEdit={() => onEditPrompt(
               failedRecord.prompt,
               failedRecord.refImages,
               failedRecord.imageCount,
               failedRecord.aspectRatio,
-              failedRecord.imageSize
+              failedRecord.imageSize,
+              failedRecord.model
             )}
             suggestEdit={suggestEdit}
           />

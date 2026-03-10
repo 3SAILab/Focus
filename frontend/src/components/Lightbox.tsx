@@ -4,21 +4,33 @@ import ImageContextMenu from './ImageContextMenu';
 
 interface LightboxProps {
   imageUrl: string | null;
+  imageUrls?: string[];          // 批次模式：所有图片 URL 列表
+  currentIndex?: number;         // 批次模式：当前图片索引
   onClose: () => void;
 }
 
-export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
+export default function Lightbox({ imageUrl, imageUrls, currentIndex = 0, onClose }: LightboxProps) {
   const [zoom, setZoom] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [imageRect, setImageRect] = useState<DOMRect | null>(null);
+  const [activeIndex, setActiveIndex] = useState(currentIndex);
   
   const imgRef = useRef<HTMLImageElement>(null);
 
+  // 同步 currentIndex prop 变化
   useEffect(() => {
-    if (imageUrl) {
+    setActiveIndex(currentIndex);
+  }, [currentIndex]);
+
+  // 计算当前显示的图片 URL
+  const displayUrl = (imageUrls && imageUrls.length > 0) ? imageUrls[activeIndex] ?? imageUrl : imageUrl;
+  const isBatchMode = imageUrls && imageUrls.length > 1;
+
+  useEffect(() => {
+    if (imageUrl || displayUrl) {
       setZoom(1);
       setPosition({ x: 0, y: 0 });
       setContextMenuPosition(null);
@@ -47,6 +59,18 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
+      // 批次导航：方向键切换图片
+      if (isBatchMode && imageUrls) {
+        if (e.key === 'ArrowRight') {
+          setActiveIndex(prev => (prev + 1) % imageUrls.length);
+          setZoom(1);
+          setPosition({ x: 0, y: 0 });
+        } else if (e.key === 'ArrowLeft') {
+          setActiveIndex(prev => (prev - 1 + imageUrls.length) % imageUrls.length);
+          setZoom(1);
+          setPosition({ x: 0, y: 0 });
+        }
+      }
     };
 
     document.addEventListener('wheel', handleWheel, { passive: false });
@@ -56,7 +80,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
       document.removeEventListener('wheel', handleWheel);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [imageUrl, onClose]);
+  }, [imageUrl, onClose, isBatchMode, imageUrls]);
 
   // 拖拽逻辑
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -102,7 +126,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
     onClose();
   };
 
-  if (!imageUrl) return null;
+  if (!displayUrl) return null;
 
   return (
     <div
@@ -121,6 +145,13 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
       >
         <X className="w-5 h-5" />
       </button>
+
+      {/* 批次导航指示器 */}
+      {isBatchMode && imageUrls && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 bg-black/50 backdrop-blur-sm rounded-full px-4 py-2">
+          <span className="text-white/80 text-sm">{activeIndex + 1} / {imageUrls.length}</span>
+        </div>
+      )}
       
       <div 
         className="w-full h-full flex items-center justify-center overflow-hidden"
@@ -128,7 +159,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
       >
         <img
           ref={imgRef}
-          src={imageUrl}
+          src={displayUrl}
           alt="预览"
           draggable={false}
           onMouseDown={handleMouseDown}
@@ -144,7 +175,7 @@ export default function Lightbox({ imageUrl, onClose }: LightboxProps) {
 
       {/* 右键菜单 */}
       <ImageContextMenu
-        imageUrl={imageUrl}
+        imageUrl={displayUrl}
         position={contextMenuPosition}
         imageRect={imageRect}
         onClose={closeContextMenu}

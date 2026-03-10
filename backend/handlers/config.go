@@ -99,6 +99,7 @@ func CheckConfigHandler(c *gin.Context) {
 		"remain":            remain,
 		"used":              used,
 		"token_name":        tokenName,
+		"platform":          string(config.GetAPIPlatform()),
 	})
 }
 
@@ -208,8 +209,8 @@ func checkVectorEngine(apiKey string) TokenValidationResult {
 
 	// 根据分组确定单张成本
 	// 限时特价: 0.099/张
-	// 优质gemini（默认）: 0.165/张
-	costPerImage := 0.165
+	// 优质gemini（默认）: 0.2475/张 (0.495/2)
+	costPerImage := 0.2475
 	if group == "限时特价" {
 		costPerImage = 0.099
 	}
